@@ -1,0 +1,1817 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dev Services Dashboard</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+    <style>
+      /* Universal box-sizing reset */
+      *,
+      *:before,
+      *:after {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f4f6f8;
+        color: #333;
+        line-height: 1.6;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        overflow-x: hidden; /* Prevent horizontal scrolling on all devices */
+        width: 100%;
+      }
+
+      /* Focus styles for accessibility */
+      :focus {
+        outline: 2px solid #3498db;
+        outline-offset: 2px;
+      }
+
+      /* Custom focus styles for buttons */
+      .tab-button:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px #3498db;
+        border-color: transparent;
+        z-index: 2;
+      }
+
+      .controls button:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px #3498db;
+        position: relative;
+        z-index: 2;
+      }
+
+      .global-controls button:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px #3498db;
+        position: relative;
+        z-index: 2;
+      }
+
+      header {
+        background-color: #2c3e50;
+        color: white;
+        padding: 0.75rem 1rem;
+        text-align: center;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        height: 3.5rem;
+        box-sizing: border-box;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 1.4rem;
+        font-weight: 500;
+        width: 90%; /* Match tab-content-container */
+        max-width: 1200px; /* Match tab-content-container */
+      }
+
+      /* Tab Navigation Styles */
+      .tab-container {
+        background-color: white;
+        border-bottom: 1px solid #ddd;
+        position: fixed;
+        top: 3.5rem; /* Height of header */
+        left: 0;
+        right: 0;
+        z-index: 90;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        padding: 0;
+        height: 3.5rem; /* Set explicit height */
+        box-sizing: border-box;
+        display: flex;
+        justify-content: center; /* Center the tab navigation */
+      }
+
+      .tab-nav {
+        display: flex;
+        justify-content: space-between;
+        width: 90%; /* Match tab-content-container */
+        height: 100%;
+        max-width: 1200px; /* Match tab-content-container */
+        padding: 0 0.25rem; /* Reduced from 0.5rem */
+      }
+
+      .tabs-left {
+        display: flex;
+        overflow-x: auto;
+        flex: 1;
+        scrollbar-width: thin; /* For Firefox */
+        -ms-overflow-style: none; /* For IE and Edge */
+        height: 100%;
+        white-space: nowrap; /* Prevent tabs from wrapping */
+      }
+
+      /* Hide scrollbar for Chrome, Safari and Opera */
+      .tabs-left::-webkit-scrollbar {
+        height: 4px;
+      }
+
+      .tabs-left::-webkit-scrollbar-thumb {
+        background-color: rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
+      }
+
+      .tabs-left::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .global-controls {
+        padding: 0 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-shrink: 0;
+      }
+
+      .global-controls button {
+        background-color: #27ae60;
+        color: white;
+        border: none;
+        padding: 0.6rem 1rem;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        font-weight: 500;
+        transition: background-color 0.2s;
+        white-space: nowrap;
+      }
+
+      .global-controls button:hover {
+        background-color: #229954;
+      }
+
+      .global-controls button:disabled {
+        background-color: #95a5a6;
+        cursor: not-allowed;
+      }
+
+      .global-controls .start-all-status {
+        font-size: 0.8rem;
+        color: #666;
+        margin-left: 0.5rem;
+      }
+
+      .tab-button {
+        background: none;
+        border: none;
+        border-right: 1px solid #eee; /* Add subtle right border */
+        padding: 0 1.25rem;
+        margin: 0;
+        cursor: pointer;
+        font-size: 1rem;
+        color: #666;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        white-space: nowrap;
+        position: relative;
+        z-index: 1;
+        flex-shrink: 0; /* Prevent tab buttons from shrinking */
+        box-sizing: border-box;
+        height: 100%; /* Fill container height */
+      }
+
+      .tab-button:first-child {
+        border-left: 1px solid #eee; /* Add left border to first tab */
+      }
+
+      .tab-button:hover {
+        background-color: #f8f9fa;
+        color: #333;
+      }
+
+      .tab-button.active {
+        color: #2c3e50;
+        background-color: #f8f9fa;
+        font-weight: 500;
+        position: relative;
+      }
+
+      .tab-button.active::after {
+        content: "";
+        position: absolute;
+        bottom: 0;
+        left: -1px;
+        right: -1px;
+        height: 3px;
+        background-color: #3498db;
+      }
+
+      .tab-status-indicator {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        min-width: 10px; /* Prevent shrinking */
+        min-height: 10px; /* Prevent shrinking */
+        border-radius: 50%;
+        margin-right: 8px;
+        flex-shrink: 0;
+      }
+
+      /* Tab Content Styles */
+      .tab-content-container {
+        padding: 1.25rem; /* Reduced from 1.5rem */
+        width: 90%; /* Use percentage instead of fixed width */
+        max-width: 1200px; /* Higher default max-width */
+        margin: 0 auto;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        box-sizing: border-box;
+        margin-top: 1rem; /* Reduced from 1.5rem */
+      }
+
+      .tab-content {
+        display: none;
+        background-color: white;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        padding: 1.75rem; /* Reduced from 2rem */
+        overflow: hidden;
+        width: 100%;
+        flex: 1;
+        min-height: 500px;
+        margin-bottom: 1rem; /* Reduced from 1.5rem */
+      }
+
+      .tab-content.active {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .service-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #eee;
+        flex-shrink: 0; /* Prevent header from shrinking */
+      }
+
+      /* Service content wrapper to allow for flexible height */
+      .service-content {
+        display: flex;
+        flex-direction: column;
+        flex-grow: 1; /* Allow content to grow and take available space */
+      }
+
+      .logs-container {
+        display: flex;
+        flex-direction: column;
+        flex-grow: 0; /* Don't allow logs container to grow unbounded */
+        min-height: 300px; /* Minimum height for logs area */
+        height: auto; /* Allow container to adjust to logs-area height */
+      }
+
+      .logs-area {
+        background-color: #2c3e50;
+        color: #ecf0f1;
+        font-family: "Menlo", "Consolas", monospace;
+        font-size: 0.85rem;
+        padding: 1.5rem;
+        border-radius: 10px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+        min-height: 300px;
+        max-height: 500px; /* Add max height to prevent unlimited expansion */
+        height: 500px; /* Fixed height */
+        overflow-y: auto;
+        flex-grow: 0; /* Prevent logs from growing and expanding parent container */
+      }
+
+      .service-title {
+        margin: 0;
+        color: #2c3e50;
+        font-size: 1.8rem;
+      }
+
+      .service-status {
+        display: flex;
+        align-items: center;
+        font-size: 1.1rem;
+        font-weight: 500;
+      }
+
+      .status-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 8px;
+        vertical-align: middle;
+      }
+
+      .status-stopped {
+        background-color: #e74c3c; /* red */
+      }
+      .status-running {
+        background-color: #2ecc71; /* green */
+      }
+      .status-starting {
+        background-color: #f39c12; /* orange */
+        animation: pulse 1.5s infinite;
+      }
+      .status-stopping {
+        background-color: #f39c12; /* orange */
+      }
+      .status-error {
+        background-color: #c0392b; /* dark red */
+      }
+      .status-crashed {
+        background-color: #8e44ad; /* purple - distinct from error */
+        animation: pulse 2s infinite;
+      }
+
+      @keyframes pulse {
+        0% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+
+      .controls {
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+      }
+
+      .controls button {
+        background-color: #3498db;
+        color: white;
+        border: none;
+        padding: 0.7rem 1.2rem;
+        margin: 0;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.95rem;
+        transition: background-color 0.2s;
+        height: 38px;
+        display: flex;
+        align-items: center;
+      }
+
+      .controls .web-link-button {
+        height: 38px;
+        padding: 0 1.2rem;
+        font-size: 0.95rem;
+        display: flex;
+        align-items: center;
+      }
+
+      .controls .web-link-button i {
+        margin-right: 6px;
+      }
+
+      /* Add divider between main controls and web links */
+      .controls button[id$="-weblink-0"] {
+        position: relative;
+        margin-left: 1rem;
+      }
+
+      .controls button[id$="-weblink-0"]::before {
+        content: "";
+        position: absolute;
+        left: -0.75rem;
+        top: 50%;
+        transform: translateY(-50%);
+        height: 28px; /* Slightly taller, but still shorter than button height */
+        width: 2px;
+        background-color: #e0e0e0;
+      }
+
+      /* Mobile adjustments for controls */
+      @media (max-width: 768px) {
+        .controls {
+          gap: 0.5rem;
+          justify-content: center;
+        }
+
+        .controls button[id$="-weblink-0"] {
+          margin-left: 0;
+        }
+
+        .controls button[id$="-weblink-0"]::before {
+          display: none;
+        }
+      }
+
+      .log-controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+
+      .log-controls h3 {
+        margin: 0;
+        color: #2c3e50;
+        font-size: 1.1rem;
+      }
+
+      .log-status-bar {
+        display: grid;
+        grid-template-columns: 75% 25%;
+        align-items: center;
+        margin-bottom: 0.5rem;
+        width: 100%;
+      }
+
+      .auto-scroll-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        cursor: pointer;
+        user-select: none;
+        font-size: 0.9rem;
+        color: #2c3e50;
+        line-height: 1;
+        height: 22px; /* Match checkbox height + border */
+        justify-self: flex-end;
+      }
+
+      .auto-scroll-toggle:hover {
+        color: #3498db;
+      }
+
+      .checkbox-container {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+      }
+
+      .checkbox-container input[type="checkbox"] {
+        opacity: 0;
+        position: absolute;
+        cursor: pointer;
+      }
+
+      .custom-checkbox {
+        width: 18px;
+        height: 18px;
+        background-color: #fff;
+        border: 2px solid #bdc3c7;
+        border-radius: 3px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        transition: all 0.2s ease;
+        flex-shrink: 0;
+      }
+
+      .checkbox-container input[type="checkbox"]:checked + .custom-checkbox {
+        background-color: #3498db;
+        border-color: #3498db;
+      }
+
+      .custom-checkbox::after {
+        content: "";
+        position: absolute;
+        left: 5px;
+        top: 2px;
+        width: 4px;
+        height: 8px;
+        border: solid white;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+
+      .checkbox-container
+        input[type="checkbox"]:checked
+        + .custom-checkbox::after {
+        opacity: 1;
+      }
+
+      .checkbox-container:hover .custom-checkbox {
+        border-color: #3498db;
+      }
+      .controls button:hover {
+        background-color: #2980b9;
+      }
+      .controls button:disabled {
+        background-color: #bdc3c7;
+        cursor: not-allowed;
+      }
+      .controls button.stop-button {
+        background-color: #e74c3c;
+      }
+      .controls button.stop-button:hover {
+        background-color: #c0392b;
+      }
+      .controls button.restart-button {
+        background-color: #f39c12;
+      }
+      .controls button.restart-button:hover {
+        background-color: #e67e22;
+      }
+      .controls button.clear-logs-button {
+        background-color: #95a5a6;
+      }
+      .controls button.clear-logs-button:hover {
+        background-color: #7f8c8d;
+      }
+
+      .connection-status {
+        display: flex;
+        align-items: center;
+        background-color: #f8f9fa;
+        padding: 8px 12px;
+        border-radius: 10px;
+        border: 1px solid #e9ecef;
+        font-size: 0.9rem;
+        color: #495057;
+        width: fit-content;
+        margin-right: 1rem;
+      }
+
+      .connection-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 8px;
+      }
+
+      .connection-indicator.connected {
+        background-color: #2ecc71; /* green */
+      }
+
+      .connection-indicator.disconnected {
+        background-color: #e74c3c; /* red */
+        animation: pulse 1.5s infinite;
+      }
+
+      .connection-indicator.connecting {
+        background-color: #f39c12; /* orange */
+        animation: pulse 1.5s infinite;
+      }
+
+      .log-line {
+        display: block;
+      }
+      .log-stdout {
+        color: #ecf0f1;
+      }
+      .log-stderr {
+        color: #e74c3c; /* red for errors */
+      }
+      .log-system {
+        color: #3498db; /* blue for system messages */
+        font-style: italic;
+      }
+
+      .error-details {
+        color: #c0392b;
+        background-color: #fadbd8;
+        border: 1px solid #f5b7b1;
+        padding: 1rem;
+        border-radius: 4px;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+        white-space: pre-wrap;
+      }
+
+      /* Main content area */
+      .main-content {
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        padding-top: 7rem; /* Space for fixed header and tabs */
+        align-items: center; /* Center content horizontally */
+        width: 100%;
+        overflow-x: hidden; /* Prevent horizontal scrolling */
+        margin: 0;
+        padding-left: 0;
+        padding-right: 0;
+      }
+
+      /* Larger screens */
+      @media (min-width: 1600px) {
+        .tab-content-container,
+        .tab-nav,
+        header h1 {
+          max-width: 1400px;
+        }
+      }
+
+      /* Reset all mobile styles for a fresh approach */
+      @media (max-width: 768px) {
+        /* Baseline mobile styles */
+        body {
+          margin: 0;
+          padding: 0;
+          width: 100vw;
+          overflow-x: hidden;
+        }
+
+        .main-content {
+          width: 100%;
+          padding: 9.5rem 0 1.5rem 0; /* Added bottom padding */
+          margin: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+
+        /* Centered container with equal padding */
+        .tab-content-container {
+          width: 92%;
+          margin: 1rem auto; /* Add vertical margin */
+          padding: 0.75rem;
+          box-sizing: border-box;
+          max-width: 100%;
+        }
+
+        /* Tab content styling */
+        .tab-content {
+          display: none;
+          background-color: white;
+          border-radius: 10px; /* Keep 10px on mobile */
+          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          padding: 1.5rem; /* Slightly more padding on mobile */
+          overflow: hidden;
+          width: 100%;
+          min-height: 400px;
+          margin: 0 auto;
+          margin-bottom: 1.5rem; /* Keep more margin on mobile */
+          position: relative;
+          left: 0;
+          right: 0;
+          margin-left: auto;
+          margin-right: auto;
+        }
+
+        .tab-content.active {
+          display: flex;
+          flex-direction: column;
+        }
+
+        /* Header and tabs positioning */
+        header {
+          height: 2.5rem;
+          padding: 0.5rem;
+          text-align: center;
+        }
+
+        header h1 {
+          width: 92%;
+          margin: 0 auto;
+          font-size: 1.2rem;
+          text-align: center;
+        }
+
+        .tab-container {
+          top: 2.5rem;
+          height: auto;
+          min-height: 6rem;
+        }
+
+        .tab-nav {
+          width: 92%;
+          margin: 0 auto;
+          flex-direction: column;
+          padding: 0 0.5rem;
+        }
+
+        /* Fix for global controls on mobile */
+        .global-controls {
+          position: absolute;
+          top: 0;
+          right: 0;
+          width: 100%;
+          background-color: white;
+          z-index: 2;
+          border-bottom: 1px solid #eee;
+          padding: 0.5rem;
+          display: flex;
+          justify-content: center;
+          box-sizing: border-box;
+        }
+
+        .global-controls button {
+          padding: 0.5rem 0.8rem;
+          font-size: 0.8rem;
+          margin: 0 auto; /* Center the button */
+        }
+
+        /* Fix for tabs on mobile */
+        .tabs-left {
+          margin-top: 3rem; /* Space for global controls */
+          order: 2;
+          justify-content: center; /* Center the tabs */
+          padding: 0.5rem 0;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          width: 100%;
+          display: flex;
+          scrollbar-width: none; /* Hide scrollbar for Firefox */
+          -ms-overflow-style: none; /* Hide scrollbar for IE/Edge */
+        }
+
+        /* Hide scrollbar for Chrome/Safari */
+        .tabs-left::-webkit-scrollbar {
+          display: none;
+        }
+
+        .tab-button {
+          padding: 0.8rem 1rem;
+          font-size: 0.9rem;
+          flex-shrink: 0;
+          min-width: auto;
+        }
+
+        /* Content elements centering */
+        .service-header {
+          flex-direction: column;
+          align-items: center;
+          gap: 0.5rem;
+          text-align: center;
+          width: 100%;
+          margin: 0 auto;
+        }
+
+        .service-title {
+          text-align: center;
+        }
+
+        .service-status {
+          margin: 0 auto;
+        }
+
+        .controls {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: center;
+          width: 100%;
+          margin: 0 auto;
+        }
+
+        .log-controls {
+          flex-direction: column;
+          align-items: center;
+          gap: 0.5rem;
+          margin-bottom: 0.75rem;
+        }
+
+        .log-status-bar {
+          grid-template-columns: 1fr;
+          gap: 0.75rem;
+        }
+
+        .connection-status {
+          width: 100%;
+          justify-content: center;
+          margin-right: 0;
+        }
+
+        .auto-scroll-toggle {
+          margin-top: 0.5rem;
+          justify-self: center;
+        }
+
+        .logs-area {
+          min-height: 250px;
+          max-height: 400px; /* Add max height for mobile */
+          height: 400px; /* Fixed height for mobile */
+          padding: 1.25rem;
+          flex-grow: 0; /* Prevent expanding on mobile */
+        }
+
+        /* Ensure all buttons are the same height and properly aligned */
+        .controls button {
+          height: 38px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 0.25rem;
+        }
+
+        /* Improve connection status display */
+        .connection-status {
+          padding: 6px 10px;
+          font-size: 0.85rem;
+          justify-content: center;
+        }
+
+        /* Ensure auto-scroll toggle is vertically aligned */
+        .auto-scroll-toggle {
+          height: 22px;
+          display: flex;
+          align-items: center;
+        }
+      }
+
+      /* Small phone screens */
+      @media (max-width: 480px) {
+        .main-content {
+          padding-top: 8.5rem;
+          padding-bottom: 1rem;
+        }
+
+        .tab-content-container {
+          width: 94%;
+          padding: 0.5rem;
+          margin: 0.75rem auto; /* Slightly smaller margin for small screens */
+        }
+
+        .tab-nav {
+          width: 94%;
+          padding: 0 0.25rem;
+        }
+
+        .tab-content {
+          padding: 0.75rem;
+          min-height: 350px;
+        }
+
+        header h1,
+        .tab-nav {
+          width: 94%;
+        }
+
+        .controls button {
+          padding: 0.5rem 0.7rem;
+          margin: 0.15rem;
+          font-size: 0.85rem;
+          flex: 0 1 auto; /* Allow buttons to shrink but not grow */
+        }
+
+        .controls button.web-link-button {
+          font-size: 0.8rem;
+          padding: 0.5rem 0.6rem;
+        }
+
+        .logs-area {
+          min-height: 200px;
+          max-height: 300px; /* Add max height for small phones */
+          height: 300px; /* Fixed height for small phones */
+          padding: 1rem;
+          font-size: 0.8rem;
+          flex-grow: 0; /* Prevent expanding on small phones */
+        }
+
+        .log-controls {
+          flex-direction: column;
+          align-items: center;
+          gap: 0.5rem;
+          margin-bottom: 0.75rem;
+        }
+
+        .tab-button {
+          padding: 0.6rem 0.8rem;
+          font-size: 0.85rem;
+        }
+
+        .global-controls button {
+          padding: 0.5rem 0.7rem;
+          font-size: 0.8rem;
+        }
+
+        .auto-scroll-toggle {
+          margin-top: 0.5rem;
+        }
+      }
+
+      /* Extra small screens */
+      @media (max-width: 360px) {
+        .tab-content {
+          padding: 0.5rem;
+        }
+
+        .controls button {
+          padding: 0.4rem 0.6rem;
+          margin: 0.1rem;
+          font-size: 0.8rem;
+        }
+
+        .service-title {
+          font-size: 1.4rem;
+        }
+      }
+
+      /* Desktop vs Mobile spacing */
+      @media (min-width: 1200px) {
+        .tab-content-container {
+          margin-top: 0.75rem; /* Even less top margin on large screens */
+        }
+
+        .tab-content {
+          padding: 1.5rem; /* Slightly less padding on larger screens */
+        }
+      }
+
+      .controls button.web-link-button {
+        font-size: 0.8rem;
+        padding: 0.5rem 0.6rem;
+      }
+
+      .logs-area {
+        min-height: 200px;
+        max-height: 300px; /* Add max height for small phones */
+        height: 300px; /* Fixed height for small phones */
+        padding: 1rem;
+        font-size: 0.8rem;
+        flex-grow: 0; /* Prevent expanding on small phones */
+      }
+
+      .log-controls {
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .tab-button {
+        padding: 0.6rem 0.8rem;
+        font-size: 0.85rem;
+      }
+
+      .global-controls button {
+        padding: 0.5rem 0.7rem;
+        font-size: 0.8rem;
+      }
+
+      .auto-scroll-toggle {
+        margin-top: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Dev Services Dashboard</h1>
+    </header>
+
+    <div class="tab-container">
+      <div class="tab-nav" id="tab-nav">
+        <div class="tabs-left" id="tabs-left" role="tablist">
+          <!-- Tabs will be dynamically generated here -->
+        </div>
+        <div class="global-controls">
+          <button id="start-all-btn" title="Start all services">
+            Start All
+          </button>
+          <span id="start-all-status" class="start-all-status"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div class="tab-content-container" id="tab-content-container">
+        <!-- Tab content will be dynamically generated here -->
+      </div>
+    </div>
+
+    <script>
+      let socket = null;
+      const MAX_CLIENT_LOGS = 500; // Max logs to keep in browser per service
+      let activeServicesConfig = []; // Will be populated by fetch
+      let activeTabId = null;
+      let startAllInProgress = false;
+      let autoScrollStates = {}; // Track auto-scroll state for each service
+
+      // Maps to store timeouts
+      const errorMessageTimeouts = new Map(); // For error messages
+      const statusMessageTimeouts = new Map(); // For status messages
+
+      function createServiceTab(service) {
+        // Create tab button
+        const tabsLeft = document.getElementById("tabs-left");
+        const tabButton = document.createElement("button");
+        tabButton.className = "tab-button";
+        tabButton.id = `tab-${service.id}`;
+        tabButton.setAttribute("role", "tab");
+        tabButton.setAttribute("aria-controls", `content-${service.id}`);
+        tabButton.setAttribute("aria-selected", "false");
+        tabButton.setAttribute("title", `View ${service.name} service`);
+
+        // Create the status indicator and text in separate spans for better alignment
+        const statusIndicator = document.createElement("span");
+        statusIndicator.className = "tab-status-indicator status-stopped";
+        statusIndicator.id = `${service.id}-tab-status-indicator`;
+
+        const tabText = document.createElement("span");
+        tabText.textContent = service.name;
+
+        tabButton.appendChild(statusIndicator);
+        tabButton.appendChild(tabText);
+
+        tabButton.addEventListener("click", () => switchTab(service.id));
+        tabsLeft.appendChild(tabButton);
+
+        // Create tab content
+        const tabContentContainer = document.getElementById(
+          "tab-content-container",
+        );
+        const tabContent = document.createElement("div");
+        tabContent.className = "tab-content";
+        tabContent.id = `content-${service.id}`;
+        tabContent.setAttribute("role", "tabpanel");
+        tabContent.setAttribute("aria-labelledby", `tab-${service.id}`);
+        tabContent.setAttribute("tabindex", "0");
+
+        tabContent.innerHTML = `
+          <div class="service-header">
+            <h2 class="service-title">${service.name}</h2>
+            <div class="service-status">
+              <span class="status-indicator status-stopped" id="${service.id}-status-indicator"></span>
+              <span id="${service.id}-status-text">stopped</span>
+            </div>
+          </div>
+
+          <div class="service-content">
+            <div id="${service.id}-error-details" class="error-details" style="display:none;"></div>
+
+            <div class="controls">
+              <button id="${service.id}-start" title="Start ${service.name}">Start</button>
+              <button id="${service.id}-stop" class="stop-button" title="Stop ${service.name}">Stop</button>
+              <button id="${service.id}-restart" class="restart-button" title="Restart ${service.name}">Restart</button>
+              <button id="${service.id}-clear-logs" class="clear-logs-button" title="Clear logs for ${service.name}">Clear Logs</button>
+              ${createWebLinkButtons(service)}
+            </div>
+
+            <div class="logs-container">
+              <div class="log-controls">
+                <h3>Logs</h3>
+              </div>
+
+              <div class="log-status-bar">
+                <div id="${service.id}-connection-status" class="connection-status">
+                  <span class="connection-indicator connecting"></span>
+                  <span id="${service.id}-connection-text">Awaiting connection...</span>
+                </div>
+                <label class="auto-scroll-toggle" for="${service.id}-auto-scroll">
+                  <div class="checkbox-container">
+                    <input type="checkbox" id="${service.id}-auto-scroll" checked>
+                    <span class="custom-checkbox"></span>
+                  </div>
+                  Auto-scroll
+                </label>
+              </div>
+
+              <pre id="${service.id}-logs" class="logs-area" role="log" aria-live="polite" aria-label="${service.name} service logs"></pre>
+            </div>
+          </div>
+        `;
+
+        tabContentContainer.appendChild(tabContent);
+
+        // Initialize auto-scroll state
+        autoScrollStates[service.id] = true;
+
+        // Add event listeners
+        document
+          .getElementById(`${service.id}-start`)
+          .addEventListener("click", () => sendAction(service.id, "start"));
+        document
+          .getElementById(`${service.id}-stop`)
+          .addEventListener("click", () => sendAction(service.id, "stop"));
+        document
+          .getElementById(`${service.id}-restart`)
+          .addEventListener("click", () => sendAction(service.id, "restart"));
+        document
+          .getElementById(`${service.id}-clear-logs`)
+          .addEventListener("click", () => {
+            const logArea = document.getElementById(`${service.id}-logs`);
+            logArea.textContent = "";
+            addLogMessage(
+              service.id,
+              "Log buffer cleared by user.",
+              "system",
+              Date.now(),
+            );
+            sendAction(service.id, "clear_logs"); // Notify server
+          });
+        document
+          .getElementById(`${service.id}-auto-scroll`)
+          .addEventListener("change", () => toggleAutoScroll(service.id));
+
+        // Add web link button event listeners if any exist
+        if (service.webLinks && service.webLinks.length > 0) {
+          service.webLinks.forEach((link, index) => {
+            const linkBtn = document.getElementById(
+              `${service.id}-weblink-${index}`,
+            );
+            if (linkBtn) {
+              linkBtn.addEventListener("click", () => {
+                window.open(link.url, "_blank");
+              });
+            }
+          });
+        }
+
+        // Set first tab as active
+        if (!activeTabId) {
+          switchTab(service.id);
+        }
+      }
+
+      // Helper function to create web link buttons HTML
+      function createWebLinkButtons(service) {
+        if (!service.webLinks || service.webLinks.length === 0) {
+          return "";
+        }
+
+        return service.webLinks
+          .map(
+            (link, index) => `
+          <button id="${service.id}-weblink-${index}" class="web-link-button" title="Open ${link.label}">
+            <i>🔗</i>${link.label}
+          </button>
+        `,
+          )
+          .join("");
+      }
+
+      function switchTab(serviceID) {
+        // Remove active class from all tabs and content
+        document.querySelectorAll(".tab-button").forEach((tab) => {
+          tab.classList.remove("active");
+          tab.setAttribute("aria-selected", "false");
+        });
+        document.querySelectorAll(".tab-content").forEach((content) => {
+          content.classList.remove("active");
+          content.setAttribute("tabindex", "-1");
+        });
+
+        // Add active class to selected tab and content
+        const selectedTab = document.getElementById(`tab-${serviceID}`);
+        const selectedContent = document.getElementById(`content-${serviceID}`);
+
+        if (selectedTab && selectedContent) {
+          selectedTab.classList.add("active");
+          selectedTab.setAttribute("aria-selected", "true");
+          selectedContent.classList.add("active");
+          selectedContent.setAttribute("tabindex", "0");
+          activeTabId = serviceID;
+        }
+      }
+
+      function toggleAutoScroll(serviceID) {
+        const autoScrollCheckbox = document.getElementById(
+          `${serviceID}-auto-scroll`,
+        );
+
+        autoScrollStates[serviceID] = autoScrollCheckbox.checked;
+
+        if (autoScrollStates[serviceID]) {
+          // Scroll to bottom when enabling auto-scroll
+          const logArea = document.getElementById(`${serviceID}-logs`);
+          if (logArea) {
+            logArea.scrollTop = logArea.scrollHeight;
+          }
+        }
+      }
+
+      function startAllServices() {
+        if (startAllInProgress) return;
+
+        // Reset all state variables to ensure a fresh start
+        startAllInProgress = false; // Reset first to avoid race conditions
+
+        // Clear any existing timeouts
+        const startAllStatus = document.getElementById("start-all-status");
+        const statusKey = "start-all-status";
+        if (statusMessageTimeouts.has(statusKey)) {
+          clearTimeout(statusMessageTimeouts.get(statusKey));
+          statusMessageTimeouts.delete(statusKey);
+        }
+
+        // Check if we're connected to the server
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+          startAllStatus.textContent =
+            "Cannot start services: Not connected to server";
+          startAllStatus.style.color = "#e74c3c"; // Red color for error
+
+          // Clear the error message after a few seconds
+          const timeoutId = setTimeout(() => {
+            startAllStatus.textContent = "";
+            startAllStatus.style.color = ""; // Reset color
+            statusMessageTimeouts.delete(statusKey);
+          }, 5000);
+
+          statusMessageTimeouts.set(statusKey, timeoutId);
+          return;
+        }
+
+        startAllInProgress = true;
+        const startAllBtn = document.getElementById("start-all-btn");
+
+        startAllBtn.disabled = true;
+        startAllStatus.textContent = "Starting services...";
+        startAllStatus.style.color = ""; // Reset color
+
+        let currentIndex = 0;
+        let startedCount = 0;
+        let failedCount = 0;
+        let abortStartAll = false;
+
+        // Create a map to track service status changes
+        const serviceStartPromises = new Map();
+        const serviceStartTimeouts = new Map();
+
+        function startNextService() {
+          if (currentIndex >= activeServicesConfig.length || abortStartAll) {
+            // All services processed or abort triggered
+            finishStartAll();
+            return;
+          }
+
+          const service = activeServicesConfig[currentIndex];
+          const statusElement = document.getElementById(
+            service.id + "-status-text",
+          );
+          const currentStatus = statusElement
+            ? statusElement.textContent
+            : "unknown";
+
+          // Skip if already running or starting
+          if (currentStatus === "Running" || currentStatus === "Starting") {
+            currentIndex++;
+            startedCount++; // Count as started since it's already running
+            startNextService();
+            return;
+          }
+
+          // Check connection status for this service
+          const connectionText = document.getElementById(
+            `${service.id}-connection-text`,
+          );
+          if (connectionText && connectionText.textContent !== "Connected") {
+            // Service is not connected, count as failed
+            failedCount++;
+            currentIndex++;
+            startNextService();
+            return;
+          }
+
+          startAllStatus.textContent = `Starting ${service.name}... (${currentIndex + 1}/${activeServicesConfig.length})`;
+
+          // Create a promise that resolves when the service starts or fails
+          const startPromise = new Promise((resolve) => {
+            // Set up a listener for status changes
+            const statusChangeListener = (event) => {
+              try {
+                const data = JSON.parse(event.data);
+                if (
+                  data.type === "status_update" &&
+                  data.serviceID === service.id
+                ) {
+                  if (data.status === "running") {
+                    // Service started successfully
+                    resolve({ success: true });
+                  } else if (
+                    data.status === "error" ||
+                    data.status === "crashed"
+                  ) {
+                    // Service failed to start
+                    resolve({
+                      success: false,
+                      errorDetails: data.errorDetails || "Failed to start",
+                    });
+                  }
+                }
+              } catch (err) {
+                console.error("Error parsing WebSocket message:", err);
+              }
+            };
+
+            // Add the listener
+            socket.addEventListener("message", statusChangeListener);
+
+            // Store the listener so we can remove it later
+            serviceStartPromises.set(service.id, {
+              resolve,
+              listener: statusChangeListener,
+            });
+
+            // Set a timeout to abort waiting after 10 seconds
+            const timeout = setTimeout(() => {
+              if (serviceStartPromises.has(service.id)) {
+                resolve({
+                  success: false,
+                  errorDetails: "Timed out waiting for service to start",
+                });
+              }
+            }, 10000);
+
+            serviceStartTimeouts.set(service.id, timeout);
+          });
+
+          // Send start command
+          sendAction(service.id, "start");
+
+          // Wait for the service to start or fail
+          startPromise.then((result) => {
+            // Clean up listeners and timeouts
+            const serviceData = serviceStartPromises.get(service.id);
+            if (serviceData) {
+              socket.removeEventListener("message", serviceData.listener);
+              serviceStartPromises.delete(service.id);
+            }
+
+            const timeout = serviceStartTimeouts.get(service.id);
+            if (timeout) {
+              clearTimeout(timeout);
+              serviceStartTimeouts.delete(service.id);
+            }
+
+            if (result.success) {
+              // Service started successfully
+              startedCount++;
+              currentIndex++;
+              startNextService();
+            } else {
+              // Service failed to start
+              failedCount++;
+              abortStartAll = true; // Abort starting any more services
+
+              // Show error in status
+              startAllStatus.textContent = `Failed to start ${service.name}: ${result.errorDetails}`;
+              startAllStatus.style.color = "#e74c3c"; // Red color for error
+
+              // Finish the start all process
+              finishStartAll();
+            }
+          });
+        }
+
+        function finishStartAll() {
+          // Clean up any remaining listeners and timeouts
+          for (const [
+            serviceID,
+            serviceData,
+          ] of serviceStartPromises.entries()) {
+            socket.removeEventListener("message", serviceData.listener);
+          }
+          serviceStartPromises.clear();
+
+          for (const timeout of serviceStartTimeouts.values()) {
+            clearTimeout(timeout);
+          }
+          serviceStartTimeouts.clear();
+
+          // Update UI
+          startAllInProgress = false;
+          startAllBtn.disabled = false;
+
+          // Clear any existing timeout
+          const statusKey = "start-all-status";
+          if (statusMessageTimeouts.has(statusKey)) {
+            clearTimeout(statusMessageTimeouts.get(statusKey));
+            statusMessageTimeouts.delete(statusKey);
+          }
+
+          let timeoutId;
+
+          if (abortStartAll) {
+            // We already set the error message when aborting
+            // Just ensure it stays visible longer
+            timeoutId = setTimeout(() => {
+              startAllStatus.textContent = "";
+              startAllStatus.style.color = ""; // Reset color
+              statusMessageTimeouts.delete(statusKey);
+            }, 8000);
+          } else if (failedCount > 0) {
+            startAllStatus.textContent = `${startedCount} services started, ${failedCount} failed`;
+            startAllStatus.style.color = "#e67e22"; // Orange for warning
+            timeoutId = setTimeout(() => {
+              startAllStatus.textContent = "";
+              startAllStatus.style.color = ""; // Reset color
+              statusMessageTimeouts.delete(statusKey);
+            }, 5000);
+          } else {
+            startAllStatus.textContent = "All services started!";
+            startAllStatus.style.color = "#2ecc71"; // Green for success
+            timeoutId = setTimeout(() => {
+              startAllStatus.textContent = "";
+              startAllStatus.style.color = ""; // Reset color
+              statusMessageTimeouts.delete(statusKey);
+            }, 5000);
+          }
+
+          statusMessageTimeouts.set(statusKey, timeoutId);
+        }
+
+        startNextService();
+      }
+
+      function sendAction(serviceID, action) {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ action, serviceID }));
+        } else {
+          console.error("WebSocket not connected.");
+
+          // Update connection status to show disconnection
+          updateConnectionStatus(
+            serviceID,
+            "disconnected",
+            "Not connected to server",
+          );
+
+          // Show a temporary error message for the specific action
+          const errorDetailsElement = document.getElementById(
+            serviceID + "-error-details",
+          );
+
+          if (errorDetailsElement) {
+            // Clear any existing timeout for this error element
+            const errorKey = `${serviceID}-error`;
+            if (errorMessageTimeouts.has(errorKey)) {
+              clearTimeout(errorMessageTimeouts.get(errorKey));
+              errorMessageTimeouts.delete(errorKey);
+            }
+
+            // Show action-specific error
+            errorDetailsElement.textContent = `Cannot ${action} service: Not connected to server. Please check your connection.`;
+            errorDetailsElement.style.display = "block";
+
+            // Auto-hide the error after 5 seconds
+            const timeoutId = setTimeout(() => {
+              errorDetailsElement.style.display = "none";
+              errorMessageTimeouts.delete(errorKey);
+            }, 5000);
+
+            errorMessageTimeouts.set(errorKey, timeoutId);
+          }
+        }
+      }
+
+      function connectWebSocket() {
+        const wsProtocol =
+          window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+        socket = new WebSocket(wsUrl);
+
+        socket.onopen = () => {
+          console.log("WebSocket connected.");
+          activeServicesConfig.forEach((service) => {
+            updateConnectionStatus(service.id, "connected", "Connected");
+
+            // Clear any error messages when connection is established
+            const errorDetailsElement = document.getElementById(
+              `${service.id}-error-details`,
+            );
+
+            const errorKey = `${service.id}-error`;
+
+            if (errorDetailsElement) {
+              errorDetailsElement.style.display = "none";
+              if (errorMessageTimeouts.has(errorKey)) {
+                clearTimeout(errorMessageTimeouts.get(errorKey));
+                errorMessageTimeouts.delete(errorKey);
+              }
+            }
+          });
+        };
+
+        socket.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          switch (data.type) {
+            case "initial_state":
+              data.services.forEach((s) => {
+                if (!document.getElementById(`tab-${s.id}`)) {
+                  console.warn(
+                    `Service tab for ${s.id} not found during initial_state, creating now.`,
+                  );
+                }
+                updateServiceStatus(s.id, s.status, s.errorDetails);
+                updateConnectionStatus(s.id, "connected", "Connected");
+                const logArea = document.getElementById(s.id + "-logs");
+                if (logArea) logArea.textContent = ""; // Clear before populating history
+                s.logs.forEach((log) =>
+                  addLogMessage(s.id, log.line, log.logType, log.timestamp),
+                );
+              });
+              break;
+            case "log":
+              addLogMessage(
+                data.serviceID,
+                data.line,
+                data.logType,
+                data.timestamp,
+              );
+              break;
+            case "status_update":
+              updateServiceStatus(
+                data.serviceID,
+                data.status,
+                data.errorDetails,
+              );
+              break;
+            case "logs_cleared":
+              const logArea = document.getElementById(data.serviceID + "-logs");
+              if (logArea) {
+                logArea.textContent = "";
+                addLogMessage(
+                  data.serviceID,
+                  "Log buffer cleared by user.",
+                  "system",
+                  Date.now(),
+                );
+              }
+              break;
+            case "error_from_server":
+              alert(`Server error: ${data.message}`);
+              if (data.serviceID) {
+                const serviceErrorArea = document.getElementById(
+                  data.serviceID + "-error-details",
+                );
+                if (serviceErrorArea) {
+                  serviceErrorArea.textContent = data.message;
+                  serviceErrorArea.style.display = "block";
+                }
+              }
+              break;
+          }
+        };
+
+        socket.onclose = (event) => {
+          console.log(
+            "WebSocket disconnected. Code:",
+            event.code,
+            "Reason:",
+            event.reason,
+            "WasClean:",
+            event.wasClean,
+          );
+          activeServicesConfig.forEach((service) => {
+            updateServiceStatus(service.id, "stopped", "Disconnected");
+
+            // Update connection status to show disconnection
+            updateConnectionStatus(
+              service.id,
+              "disconnected",
+              "Disconnected. Retrying...",
+            );
+
+            // Clear any existing error timeouts
+            const errorKey = `${service.id}-error`;
+            if (errorMessageTimeouts.has(errorKey)) {
+              clearTimeout(errorMessageTimeouts.get(errorKey));
+              errorMessageTimeouts.delete(errorKey);
+            }
+
+            // Hide any existing error messages as the connection status will show the state
+            const errorDetailsElement = document.getElementById(
+              `${service.id}-error-details`,
+            );
+            if (errorDetailsElement) {
+              errorDetailsElement.style.display = "none";
+            }
+          });
+          setTimeout(connectWebSocket, 3000);
+        };
+
+        socket.onerror = (error) => {
+          console.error("WebSocket error:", error);
+          activeServicesConfig.forEach((service) => {
+            // Update connection status to show error
+            updateConnectionStatus(
+              service.id,
+              "disconnected",
+              "Connection error",
+            );
+
+            // Clear any existing error timeouts
+            const errorKey = `${service.id}-error`;
+            if (errorMessageTimeouts.has(errorKey)) {
+              clearTimeout(errorMessageTimeouts.get(errorKey));
+              errorMessageTimeouts.delete(errorKey);
+            }
+
+            // Hide any existing error messages as the connection status will show the state
+            const errorDetailsElement = document.getElementById(
+              `${service.id}-error-details`,
+            );
+            if (errorDetailsElement) {
+              errorDetailsElement.style.display = "none";
+            }
+          });
+        };
+      }
+
+      function updateConnectionStatus(serviceID, status, message) {
+        const connectionStatusText = document.getElementById(
+          `${serviceID}-connection-text`,
+        );
+        const connectionIndicator = document.querySelector(
+          `#${serviceID}-connection-status .connection-indicator`,
+        );
+
+        // If we're updating the connection status, clear any existing error timeout
+        const errorDetailsElement = document.getElementById(
+          `${serviceID}-error-details`,
+        );
+
+        const errorKey = `${serviceID}-error`;
+
+        if (errorDetailsElement && errorMessageTimeouts.has(errorKey)) {
+          clearTimeout(errorMessageTimeouts.get(errorKey));
+          errorMessageTimeouts.delete(errorKey);
+
+          // If we're connecting successfully, hide any error messages immediately
+          if (status === "connected") {
+            errorDetailsElement.style.display = "none";
+          }
+        }
+
+        if (connectionStatusText) {
+          connectionStatusText.textContent = message;
+        }
+
+        if (connectionIndicator) {
+          connectionIndicator.className = `connection-indicator ${status}`;
+        }
+
+        // Clear logs area if it contains only connection messages
+        const logArea = document.getElementById(`${serviceID}-logs`);
+        if (
+          logArea &&
+          (logArea.textContent === "Awaiting connection..." ||
+            logArea.textContent ===
+              "Connection open. Waiting for initial state..." ||
+            logArea.textContent.includes("Disconnected. Retrying..."))
+        ) {
+          logArea.textContent = "";
+        }
+      }
+
+      function addLogMessage(serviceID, line, logType = "stdout", timestamp) {
+        const logArea = document.getElementById(serviceID + "-logs");
+        if (!logArea) return;
+
+        const logLineElement = document.createElement("span");
+        logLineElement.className = `log-line log-${logType}`;
+
+        const ts = new Date(timestamp).toLocaleTimeString();
+        logLineElement.textContent = `[${ts}] ${line}`;
+
+        logArea.appendChild(logLineElement);
+        logArea.appendChild(document.createTextNode("\n"));
+
+        while (logArea.childNodes.length > MAX_CLIENT_LOGS + 10) {
+          logArea.removeChild(logArea.firstChild);
+        }
+
+        // Only auto-scroll if enabled for this service
+        if (autoScrollStates[serviceID]) {
+          logArea.scrollTop = logArea.scrollHeight;
+        }
+      }
+
+      function updateServiceStatus(serviceID, status, errorDetails = null) {
+        const statusTextElement = document.getElementById(
+          serviceID + "-status-text",
+        );
+        const statusIndicatorElement = document.getElementById(
+          serviceID + "-status-indicator",
+        );
+        const tabStatusIndicatorElement = document.getElementById(
+          serviceID + "-tab-status-indicator",
+        );
+        const errorDetailsElement = document.getElementById(
+          serviceID + "-error-details",
+        );
+
+        // Capitalize first letter of status
+        const capitalizedStatus =
+          status.charAt(0).toUpperCase() + status.slice(1);
+
+        if (statusTextElement)
+          statusTextElement.textContent = capitalizedStatus;
+        if (statusIndicatorElement)
+          statusIndicatorElement.className = `status-indicator status-${status}`;
+        if (tabStatusIndicatorElement)
+          tabStatusIndicatorElement.className = `tab-status-indicator status-${status}`;
+
+        const startButton = document.getElementById(serviceID + "-start");
+        const stopButton = document.getElementById(serviceID + "-stop");
+        const restartButton = document.getElementById(serviceID + "-restart");
+
+        if (startButton && stopButton && restartButton) {
+          startButton.disabled =
+            status === "running" ||
+            status === "starting" ||
+            status === "stopping";
+          stopButton.disabled =
+            status === "stopped" ||
+            status === "error" ||
+            status === "crashed" ||
+            status === "starting" ||
+            status === "stopping";
+          restartButton.disabled =
+            status === "starting" || status === "stopping";
+        }
+
+        if (errorDetailsElement) {
+          if ((status === "error" || status === "crashed") && errorDetails) {
+            const statusLabel = status === "crashed" ? "Crash" : "Error";
+            errorDetailsElement.textContent = `${statusLabel}: ${errorDetails}`;
+            errorDetailsElement.style.display = "block";
+          } else {
+            errorDetailsElement.textContent = "";
+            errorDetailsElement.style.display = "none";
+          }
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        fetch("/api/services-config")
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then((fetchedServicesConfig) => {
+            activeServicesConfig = fetchedServicesConfig;
+            activeServicesConfig.forEach((service) =>
+              createServiceTab(service),
+            );
+
+            // Add event listener for Start All button
+            document
+              .getElementById("start-all-btn")
+              .addEventListener("click", startAllServices);
+
+            connectWebSocket();
+          })
+          .catch((error) => {
+            console.error("Error fetching services config:", error);
+            const container = document.getElementById("tab-content-container");
+            if (container) {
+              container.innerHTML = `<p style="color: red; text-align: center;">Failed to load service configurations: ${error.message}. Please check if the Dev UI server is running correctly.</p>`;
+            }
+          });
+      });
+
+      // Add keyboard navigation for tabs
+      document.addEventListener("keydown", function (e) {
+        // Only handle if we have tabs and one is active
+        if (!activeTabId) return;
+
+        const tabs = document.querySelectorAll(".tab-button");
+        if (!tabs.length) return;
+
+        const currentIndex = Array.from(tabs).findIndex(
+          (tab) => tab.id === `tab-${activeTabId}`,
+        );
+        if (currentIndex === -1) return;
+
+        // Left arrow: previous tab
+        if (
+          e.key === "ArrowLeft" &&
+          document.activeElement.classList.contains("tab-button")
+        ) {
+          const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+          const prevTabId = tabs[prevIndex].id.replace("tab-", "");
+          switchTab(prevTabId);
+          tabs[prevIndex].focus();
+          e.preventDefault();
+        }
+
+        // Right arrow: next tab
+        if (
+          e.key === "ArrowRight" &&
+          document.activeElement.classList.contains("tab-button")
+        ) {
+          const nextIndex = (currentIndex + 1) % tabs.length;
+          const nextTabId = tabs[nextIndex].id.replace("tab-", "");
+          switchTab(nextTabId);
+          tabs[nextIndex].focus();
+          e.preventDefault();
+        }
+      });
+    </script>
+  </body>
+</html>

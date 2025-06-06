@@ -1,0 +1,54 @@
+{
+  "name": "dev-ui",
+  "version": "0.0.1",
+  "description": "TODO: add description",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun run update-readme && bun run update-changelog && tsup",
+    "dev": "tsup --watch",
+    "test": "bun test",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,scss,md,html}\"",
+    "lint": "eslint src --ext .ts",
+    "update-readme": "markdown-toc-gen update README.md && bun run scripts/update-readme-version.ts",
+    "update-changelog": "markdown-toc-gen update CHANGELOG.md"
+  },
+  "keywords": [
+    "todo: add keywords"
+  ],
+  "author": "Kevin Whitman (https://github.com/keverw)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keverw/dev-ui"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.13",
+    "@types/node": "^20.10.0",
+    "@types/pg": "^8.15.1",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.55.0",
+    "markdown-toc-gen": "^1.2.0",
+    "prettier": "^3.5.3",
+    "tsup": "^8.4.0",
+    "typescript": "^5.3.0"
+  },
+  "peerDependencies": {
+    "pg": "^8.15.6"
+  },
+  "dependencies": {
+    "get-port": "^7.1.0"
+  }
+}
