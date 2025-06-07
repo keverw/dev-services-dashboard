@@ -2,6 +2,8 @@
 
 [![npm version](https://badge.fury.io/js/dev-ui.svg)](https://badge.fury.io/js/dev-ui)
 
+![](DevUI-Icon.png)
+
 A lightweight development UI dashboard for managing and monitoring multiple services during local development.
 
 ![Dev UI Dashboard](https://via.placeholder.com/800x450?text=Dev+UI+Dashboard)
