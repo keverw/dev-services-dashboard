@@ -1,12 +1,12 @@
-# Dev-UI v0.0.1
+# Dev Services Dashboard v0.0.1
 
-[![npm version](https://badge.fury.io/js/dev-ui.svg)](https://badge.fury.io/js/dev-ui)
+[![npm version](https://badge.fury.io/js/dev-services-dashboard.svg)](https://badge.fury.io/js/dev-services-dashboard)
 
-![](DevUI-Icon.png)
+![](icon-thumbnail)
 
 A lightweight development UI dashboard for managing and monitoring multiple services during local development.
 
-[![Dev UI dashboard showing multiple services](screenshot.png)](screenshot.png)
+[![Dev Services Dashboard showing multiple services](screenshot.png)](screenshot.png)
 
 <!-- toc -->
 
@@ -17,6 +17,10 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
   - [Configuration Options](#configuration-options)
   - [Service Configuration](#service-configuration)
   - [Logger Configuration](#logger-configuration)
+    - [No Logging by Default](#no-logging-by-default)
+    - [Using the Console Logger](#using-the-console-logger)
+    - [Creating a Custom Logger](#creating-a-custom-logger)
+    - [Disabling Logging](#disabling-logging)
 - [Features](#features)
 - [Technical Details](#technical-details)
 - [Example](#example)
@@ -31,7 +35,7 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
 
 ## Overview
 
-Dev UI provides a web-based dashboard to:
+Dev Services Dashboard provides a web-based dashboard to:
 
 - Start, stop, and restart development services
 - Monitor service logs in real-time
@@ -41,11 +45,11 @@ Dev UI provides a web-based dashboard to:
 ## Installation
 
 ```bash
-bun install dev-ui
+bun install dev-services-dashboard
 # or
-npm add dev-ui
+npm add dev-services-dashboard
 # or
-yarn add dev-ui
+yarn add dev-services-dashboard
 ```
 
 ## Usage
@@ -55,7 +59,10 @@ yarn add dev-ui
 1. Import the library and define your services:
 
 ```typescript
-import { startDevUI, type UserServiceConfig } from "dev-ui";
+import {
+  startDevServicesDashboard,
+  type UserServiceConfig,
+} from "dev-services-dashboard";
 
 // Define your services
 const services: UserServiceConfig[] = [
@@ -72,8 +79,8 @@ const services: UserServiceConfig[] = [
   },
 ];
 
-// Start the DevUI
-startDevUI({
+// Start the Dev Services Dashboard
+startDevServicesDashboard({
   port: 4000,
   hostname: "localhost",
   maxLogLines: 200,
@@ -85,16 +92,16 @@ startDevUI({
 
 ### Configuration Options
 
-The `startDevUI` function accepts a configuration object with the following properties:
+The `startDevServicesDashboard` function accepts a configuration object with the following properties:
 
-| Option        | Type                | Default           | Description                                               |
-| ------------- | ------------------- | ----------------- | --------------------------------------------------------- |
-| `port`        | number              | 4000              | The port to run the Dev UI server on                      |
-| `hostname`    | string              | 'localhost'       | The hostname to bind the server to                        |
-| `maxLogLines` | number              | 200               | Maximum number of log lines to keep in memory per service |
-| `defaultCwd`  | string              | process.cwd()     | Default working directory for services                    |
-| `services`    | UserServiceConfig[] | required          | Array of service configurations                           |
-| `logger`      | DevUILoggerFunction | none (no logging) | Custom logger function for Dev UI internal logs           |
+| Option        | Type                               | Default           | Description                                                     |
+| ------------- | ---------------------------------- | ----------------- | --------------------------------------------------------------- |
+| `port`        | number                             | 4000              | The port to run the Dev Services Dashboard server on            |
+| `hostname`    | string                             | 'localhost'       | The hostname to bind the server to                              |
+| `maxLogLines` | number                             | 200               | Maximum number of log lines to keep in memory per service       |
+| `defaultCwd`  | string                             | process.cwd()     | Default working directory for services                          |
+| `services`    | UserServiceConfig[]                | required          | Array of service configurations                                 |
+| `logger`      | DevServicesDashboardLoggerFunction | none (no logging) | Custom logger function for Dev Services Dashboard internal logs |
 
 ### Service Configuration
 
@@ -110,17 +117,17 @@ Each service is defined with the following properties:
 
 ### Logger Configuration
 
-Dev UI supports pluggable logging to integrate with your existing logging infrastructure or to disable logging entirely.
+Dev Services Dashboard supports pluggable logging to integrate with your existing logging infrastructure or to disable logging entirely.
 
 #### No Logging by Default
 
-By default, Dev UI doesn't log anything unless you provide a logger:
+By default, Dev Services Dashboard doesn't log anything unless you provide a logger:
 
 ```typescript
-import { startDevUI } from "dev-ui";
+import { startDevServicesDashboard } from "dev-services-dashboard";
 
 // No internal logging
-startDevUI({
+startDevServicesDashboard({
   services: [...],
 });
 ```
@@ -130,12 +137,19 @@ startDevUI({
 To enable console logging, use the provided console logger factory:
 
 ```typescript
-import { startDevUI, createConsoleLogger } from "dev-ui";
+import { startDevServicesDashboard, createConsoleLogger } from "dev-services-dashboard";
 
 // Enable console logging
-startDevUI({
+startDevServicesDashboard({
   services: [...],
   logger: createConsoleLogger(),
+});
+
+// For easy on/off control based on environment
+const LOGGING_ENABLED = process.env.NODE_ENV === "development";
+startDevServicesDashboard({
+  services: [...],
+  logger: createConsoleLogger(LOGGING_ENABLED),
 });
 ```
 
@@ -144,51 +158,33 @@ startDevUI({
 You can provide your own logger function:
 
 ```typescript
-import { startDevUI, type DevUILoggerFunction } from "dev-ui";
+import { startDevServicesDashboard, type DevServicesDashboardLoggerFunction } from "dev-services-dashboard";
 
-const customLogger: DevUILoggerFunction = (type, message, data) => {
+const customLogger: DevServicesDashboardLoggerFunction = (type, message, data) => {
   // Integrate with your logging system
   myLogger.log({
     level: type,
     message,
     data,
-    service: "dev-ui"
+    service: "dev-services-dashboard"
   });
 };
 
-startDevUI({
+startDevServicesDashboard({
   services: [...],
   logger: customLogger,
 });
 ```
 
-#### Using the Console Logger Factory
-
-For easy on/off control of console logging:
-
-```typescript
-import { startDevUI, createConsoleLogger } from "dev-ui";
-
-const LOGGING_ENABLED = process.env.NODE_ENV === "development";
-
-// Create a console logger that can be easily enabled/disabled
-const logger = createConsoleLogger(LOGGING_ENABLED);
-
-startDevUI({
-  services: [...],
-  logger,
-});
-```
-
 #### Disabling Logging
 
-To disable all Dev UI internal logging:
+To disable all Dev Services Dashboard internal logging:
 
 ```typescript
-import { startDevUI } from "dev-ui";
+import { startDevServicesDashboard } from "dev-services-dashboard";
 
 // Provide a no-op logger
-startDevUI({
+startDevServicesDashboard({
   services: [...],
   logger: () => {}, // No logging
 });
@@ -204,7 +200,7 @@ startDevUI({
 
 ## Technical Details
 
-The Dev UI consists of:
+The Dev Services Dashboard consists of:
 
 - An HTTP server using Node's native `http` module that manages service processes and provides a WebSocket API
 - WebSocket communication powered by the `ws` library
@@ -215,7 +211,10 @@ The Dev UI consists of:
 
 ```typescript
 // scripts/dev-ui-runner.ts
-import { startDevUI, type UserServiceConfig } from "dev-ui";
+import {
+  startDevServicesDashboard,
+  type UserServiceConfig,
+} from "dev-services-dashboard";
 
 const services: UserServiceConfig[] = [
   {
@@ -237,24 +236,24 @@ const services: UserServiceConfig[] = [
   },
 ];
 
-startDevUI({
+startDevServicesDashboard({
   port: 4000,
   hostname: "localhost",
   maxLogLines: 200,
   services,
 });
 
-console.log("DevUI started");
+console.log("Dev Services Dashboard started");
 ```
 
 ## Demo
 
-Want to see Dev UI in action? We've included a demo with simulated services:
+Want to see Dev Services Dashboard in action? We've included a demo with simulated services:
 
 ```bash
 # Clone the repository
-git clone https://github.com/keverw/dev-ui.git
-cd dev-ui
+git clone https://github.com/keverw/dev-services-dashboard.git
+cd dev-services-dashboard
 
 # Install dependencies
 bun install
@@ -273,7 +272,7 @@ Open http://localhost:4000 to explore the dashboard and try features like starti
 
 ## Development
 
-Dev UI is built with TypeScript and uses modern JavaScript features.
+Dev Services Dashboard is built with TypeScript and uses modern JavaScript features.
 
 ```bash
 # Install dependencies
@@ -315,7 +314,7 @@ Make sure to commit the new version back to GIT
 
 ### backend
 
-This is where the `startDevUI` is imported from. This is responsible for managing the service underlying processes, the HTTP API and WebSocket Handler.
+This is where the `startDevServicesDashboard` is imported from. This is responsible for managing the service underlying processes, the HTTP API and WebSocket Handler.
 
 ### frontend
 
@@ -323,7 +322,7 @@ This is where the frontend files are maintained. Currently a single HTML file bu
 
 ## Future Ideas
 
-- **Headless Mode**: Support running Dev UI without serving the web interface, ideal for building IDE extensions or integrating with other development tools
+- **Headless Mode**: Support running Dev Services Dashboard without serving the web interface, ideal for building IDE extensions or integrating with other development tools
 - **React Frontend**: Consider remaking the frontend using React for better maintainability and extensibility
 - **Modern Build Tooling**: If implementing the React frontend, consider using Tailwind CSS for styling and Vite for fast development and building
 - **Dark Mode Support**: Full dark mode theme support for better developer experience during long coding sessions

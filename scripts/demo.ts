@@ -1,19 +1,19 @@
 /**
- * Dev UI Demo
+ * Dev Services Dashboard Demo
  *
- * This demo showcases the Dev UI functionality using simulated services
+ * This demo showcases the Dev Services Dashboard functionality using simulated services
  * that generate realistic logs and demonstrate the dashboard capabilities.
  *
  * Based on the example from the README.md
  */
 
 import {
-  startDevUI,
+  startDevServicesDashboard,
   type UserServiceConfig,
   createConsoleLogger,
 } from "../src/backend/index";
 
-console.log("🎬 Starting Dev UI Demo...");
+console.log("🎬 Starting Dev Services Dashboard Demo...");
 console.log("📖 This demo is based on the example from README.md");
 console.log("🔧 Explicitly using the console logger (no logging by default)");
 console.log("");
@@ -38,11 +38,11 @@ const services: UserServiceConfig[] = [
   },
 ];
 
-// Explicitly use the console logger (Dev UI doesn't log by default unless you provide a logger)
+// Explicitly use the console logger (Dev Services Dashboard doesn't log by default unless you provide a logger)
 const demoLogger = createConsoleLogger(true); // Enable logging for demo
 
-// Start the DevUI
-startDevUI({
+// Start the Dev Services Dashboard
+startDevServicesDashboard({
   port: 4000,
   hostname: "localhost",
   maxLogLines: 200,
@@ -51,7 +51,7 @@ startDevUI({
 });
 
 console.log("");
-console.log("🎉 Dev UI Demo started!");
+console.log("🎉 Dev Services Dashboard Demo started!");
 console.log("📍 Open your browser to: http://localhost:4000");
 console.log("");
 console.log("🔧 Demo Features:");

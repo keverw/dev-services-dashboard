@@ -16,7 +16,7 @@ export interface WebLink {
 /**
  * Logger function type for DevUI
  */
-export type DevUILoggerFunction = (
+export type DevServicesDashboardLoggerFunction = (
   type: "info" | "error" | "warn",
   message: string,
   data?: object,
@@ -50,7 +50,7 @@ export interface DevUIConfig {
   maxLogLines?: number;
   defaultCwd?: string;
   services: UserServiceConfig[];
-  logger?: DevUILoggerFunction;
+  logger?: DevServicesDashboardLoggerFunction;
 }
 
 export interface DevUIServer {

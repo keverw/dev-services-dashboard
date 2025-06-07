@@ -7,7 +7,9 @@ import { createServer } from "http";
 import { WebSocketHandler } from "./web-socket-handler";
 
 // --- Main export function ---
-export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
+export function startDevServicesDashboard(
+  config: DevUIConfig,
+): Promise<DevUIServer> {
   const PORT = config.port || 4000;
   const HOSTNAME = config.hostname || "localhost";
   const MAX_LOG_LINES = config.maxLogLines || 200;
@@ -56,12 +58,12 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
       // Shutdown handler
       const handleShutdownSignal = async (signal: string) => {
         logger.info(
-          `Received ${signal}. Shutting down Dev UI server and services...`,
+          `Received ${signal}. Shutting down Dev Services Dashboard server and services...`,
         );
 
         await serviceManager.stopAllServices();
 
-        logger.info("Stopping Dev UI HTTP server...");
+        logger.info("Stopping Dev Services Dashboard HTTP server...");
         httpServer.close();
         wsServer.close();
         process.exit(0);
@@ -76,7 +78,9 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
 
       // Start server
       httpServer.listen(PORT, HOSTNAME, () => {
-        logger.info(`Dev UI server running on http://${HOSTNAME}:${PORT}`);
+        logger.info(
+          `Dev Services Dashboard server running on http://${HOSTNAME}:${PORT}`,
+        );
 
         resolve({
           httpServer,
@@ -95,11 +99,17 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
       });
 
       httpServer.on("error", (error) => {
-        logger.error("Fatal error starting Dev UI server:", error as object);
+        logger.error(
+          "Fatal error starting Dev Services Dashboard server:",
+          error as object,
+        );
         reject(error);
       });
     } catch (error) {
-      logger.error("Fatal error starting Dev UI server:", error as object);
+      logger.error(
+        "Fatal error starting Dev Services Dashboard server:",
+        error as object,
+      );
       reject(error);
     }
   });

@@ -30,9 +30,13 @@ mock.module("fs/promises", () => ({
 }));
 
 // Import after mocking
-import { startDevUI, type DevUIConfig, type UserServiceConfig } from "./index";
+import {
+  startDevServicesDashboard,
+  type DevUIConfig,
+  type UserServiceConfig,
+} from "./index";
 
-describe("Dev UI", () => {
+describe("Dev Services Dashboard", () => {
   let mockBroadcast: ReturnType<typeof mock>;
   let testConfig: DevUIConfig;
 
@@ -67,7 +71,7 @@ describe("Dev UI", () => {
     // For now, let's test through the main interface
 
     it("should create services from config", async () => {
-      const server = await startDevUI(testConfig);
+      const server = await startDevServicesDashboard(testConfig);
       expect(server).toBeDefined();
       expect(server.httpServer).toBeDefined();
       expect(server.wsServer).toBeDefined();
@@ -85,7 +89,7 @@ describe("Dev UI", () => {
 
   describe("HTTP Handler", () => {
     it("should serve HTML on root path", async () => {
-      const server = await startDevUI(testConfig);
+      const server = await startDevServicesDashboard(testConfig);
 
       // Test HTTP request handling
       const response = await fetch(`http://localhost:${server.port}/`);
@@ -96,7 +100,7 @@ describe("Dev UI", () => {
     });
 
     it("should serve services config on API endpoint", async () => {
-      const server = await startDevUI(testConfig);
+      const server = await startDevServicesDashboard(testConfig);
 
       const response = await fetch(
         `http://localhost:${server.port}/api/services-config`,
@@ -118,7 +122,7 @@ describe("Dev UI", () => {
     });
 
     it("should return 404 for unknown paths", async () => {
-      const server = await startDevUI(testConfig);
+      const server = await startDevServicesDashboard(testConfig);
 
       const response = await fetch(`http://localhost:${server.port}/unknown`);
       expect(response.status).toBe(404);
@@ -129,7 +133,7 @@ describe("Dev UI", () => {
 
   describe("WebSocket Handler", () => {
     it("should handle WebSocket connections", async () => {
-      const server = await startDevUI(testConfig);
+      const server = await startDevServicesDashboard(testConfig);
 
       // Create WebSocket connection
       const ws = new WebSocket(`ws://localhost:${server.port}`);
@@ -147,7 +151,7 @@ describe("Dev UI", () => {
     });
 
     it("should send initial state on connection", async () => {
-      const server = await startDevUI(testConfig);
+      const server = await startDevServicesDashboard(testConfig);
 
       const ws = new WebSocket(`ws://localhost:${server.port}`);
 
@@ -177,7 +181,7 @@ describe("Dev UI", () => {
 
   describe("Service Process Management", () => {
     it("should handle invalid service ID", async () => {
-      const server = await startDevUI(testConfig);
+      const server = await startDevServicesDashboard(testConfig);
 
       const ws = new WebSocket(`ws://localhost:${server.port}`);
 
@@ -231,7 +235,7 @@ describe("Dev UI", () => {
         ],
       };
 
-      const server = await startDevUI(minimalConfig);
+      const server = await startDevServicesDashboard(minimalConfig);
       expect(server).toBeDefined();
       expect(server.port).toBe(port);
 
@@ -251,7 +255,7 @@ describe("Dev UI", () => {
         ],
       };
 
-      const server = await startDevUI(minimalConfig);
+      const server = await startDevServicesDashboard(minimalConfig);
 
       const response = await fetch(
         `http://localhost:${server.port}/api/services-config`,
@@ -284,13 +288,13 @@ describe("Dev UI", () => {
       };
 
       // Server should still start even with invalid service config
-      const server = await startDevUI(invalidConfig);
+      const server = await startDevServicesDashboard(invalidConfig);
       expect(server).toBeDefined();
       await server.stop();
     });
 
     it("should handle malformed WebSocket messages", async () => {
-      const server = await startDevUI(testConfig);
+      const server = await startDevServicesDashboard(testConfig);
 
       const ws = new WebSocket(`ws://localhost:${server.port}`);
 

@@ -1,5 +1,5 @@
 {
-  "name": "dev-ui",
+  "name": "dev-services-dashboard",
   "version": "0.0.1",
   "description": "TODO: add description",
   "main": "dist/index.js",
@@ -33,7 +33,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/keverw/dev-ui"
+    "url": "https://github.com/keverw/dev-services-dashboard"
   },
   "devDependencies": {
     "@types/bun": "^1.2.13",

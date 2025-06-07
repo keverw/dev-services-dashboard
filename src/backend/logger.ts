@@ -1,4 +1,4 @@
-import { DevUILoggerFunction } from "./types";
+import { DevServicesDashboardLoggerFunction } from "./types";
 
 /**
  * Console-based logger implementation for DevUI
@@ -6,7 +6,7 @@ import { DevUILoggerFunction } from "./types";
  */
 export const createConsoleLogger = (
   enabled: boolean = true,
-): DevUILoggerFunction => {
+): DevServicesDashboardLoggerFunction => {
   return (type, message, data) => {
     if (!enabled) return;
 
@@ -19,12 +19,12 @@ export const createConsoleLogger = (
 };
 
 /**
- * Logger class that wraps a DevUILoggerFunction for dependency injection
+ * Logger class that wraps a DevServicesDashboardLoggerFunction for dependency injection
  */
 export class Logger {
-  private loggerFn?: DevUILoggerFunction;
+  private loggerFn?: DevServicesDashboardLoggerFunction;
 
-  constructor(logger?: DevUILoggerFunction) {
+  constructor(logger?: DevServicesDashboardLoggerFunction) {
     this.loggerFn = logger;
   }
 

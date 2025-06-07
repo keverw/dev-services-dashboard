@@ -19,14 +19,14 @@ const readmePath = path.join(rootDir, "README.md");
 let readmeContent = fs.readFileSync(readmePath, "utf8");
 
 // Update the version in the README.md file
-const titleRegex = /^# Dev-UI v[0-9]+\.[0-9]+\.[0-9]+/m;
-const newTitle = `# Dev-UI v${version}`;
+const titleRegex = /^# Dev Services Dashboard v[0-9]+\.[0-9]+\.[0-9]+/m;
+const newTitle = `# Dev Services Dashboard v${version}`;
 
 if (titleRegex.test(readmeContent)) {
   readmeContent = readmeContent.replace(titleRegex, newTitle);
 } else {
   // If the version format doesn't exist yet, replace the basic title
-  readmeContent = readmeContent.replace(/^# Dev-UI/m, newTitle);
+  readmeContent = readmeContent.replace(/^# Dev Services Dashboard/m, newTitle);
 }
 
 // Write the updated README.md file
