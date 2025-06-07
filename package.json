@@ -1,7 +1,7 @@
 {
   "name": "dev-services-dashboard",
   "version": "0.0.1",
-  "description": "TODO: add description",
+  "description": "A lightweight development UI dashboard for managing and monitoring multiple services during local development",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -27,7 +27,16 @@
     "update-changelog": "markdown-toc-gen update CHANGELOG.md"
   },
   "keywords": [
-    "todo: add keywords"
+    "development",
+    "dashboard",
+    "services",
+    "monitoring",
+    "logs",
+    "process-management",
+    "developer-tools",
+    "local-development",
+    "websocket",
+    "real-time"
   ],
   "author": "Kevin Whitman (https://github.com/keverw)",
   "license": "MIT",
