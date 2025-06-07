@@ -16,7 +16,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun run update-readme && bun run update-changelog && tsup",
+    "build": "bun run update-readme && bun run update-changelog && bun run create-frontend-bundle && tsup",
+    "create-frontend-bundle": "bun run scripts/create-vfs.ts",
+    "demo": "bun run create-frontend-bundle && bun run scripts/demo.ts",
     "dev": "tsup --watch",
     "test": "bun test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,scss,md,html}\"",
@@ -37,6 +39,7 @@
     "@types/bun": "^1.2.13",
     "@types/node": "^20.10.0",
     "@types/pg": "^8.15.1",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
     "eslint": "^8.55.0",
@@ -49,6 +52,9 @@
     "pg": "^8.15.6"
   },
   "dependencies": {
-    "get-port": "^7.1.0"
+    "@types/mime-types": "^3.0.1",
+    "get-port": "^7.1.0",
+    "mime-types": "^3.0.1",
+    "ws": "^8.18.2"
   }
 }

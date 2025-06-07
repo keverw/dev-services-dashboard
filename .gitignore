@@ -5,6 +5,8 @@ node_modules/
 
 # Build outputs
 dist/
+# Frontend VFS Bundle - this is generated during the build process
+src/backend/frontend-vfs.ts
 
 # Bun
 bun.lockb

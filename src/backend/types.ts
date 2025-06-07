@@ -46,5 +46,6 @@ export interface DevUIConfig {
 export interface DevUIServer {
   httpServer: HttpServer;
   wsServer: WebSocketServer;
+  port: number;
   stop: () => Promise<void>;
 }

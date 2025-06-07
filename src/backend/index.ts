@@ -1,10 +1,10 @@
 import { WebSocketServer, WebSocket } from "ws";
-import { logMessage } from "./backend/utils";
-import { ServiceManager } from "./backend/service-manager";
-import { DevUIConfig, DevUIServer } from "./backend/types";
-import { HttpHandler } from "./backend/http-handler";
+import { logMessage } from "./utils";
+import { ServiceManager } from "./service-manager";
+import { DevUIConfig, DevUIServer } from "./types";
+import { HttpHandler } from "./http-handler";
 import { createServer } from "http";
-import { WebSocketHandler } from "./backend/web-socket-handler";
+import { WebSocketHandler } from "./web-socket-handler";
 
 // --- Main export function ---
 export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
@@ -64,8 +64,12 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
         process.exit(0);
       };
 
-      process.on("SIGINT", handleShutdownSignal);
-      process.on("SIGTERM", handleShutdownSignal);
+      // Store signal handler references for cleanup
+      const sigintHandler = () => handleShutdownSignal("SIGINT");
+      const sigtermHandler = () => handleShutdownSignal("SIGTERM");
+
+      process.on("SIGINT", sigintHandler);
+      process.on("SIGTERM", sigtermHandler);
 
       // Start server
       httpServer.listen(PORT, HOSTNAME, () => {
@@ -77,7 +81,12 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
         resolve({
           httpServer,
           wsServer,
+          port: PORT,
           stop: async () => {
+            // Remove signal handlers to prevent interference
+            process.removeListener("SIGINT", sigintHandler);
+            process.removeListener("SIGTERM", sigtermHandler);
+
             await serviceManager.stopAllServices();
             httpServer.close();
             wsServer.close();
@@ -86,15 +95,23 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
       });
 
       httpServer.on("error", (error) => {
-        logMessage("error", "Fatal error starting Dev UI server:", error);
+        logMessage(
+          "error",
+          "Fatal error starting Dev UI server:",
+          error as object,
+        );
         reject(error);
       });
     } catch (error) {
-      logMessage("error", "Fatal error starting Dev UI server:", error);
+      logMessage(
+        "error",
+        "Fatal error starting Dev UI server:",
+        error as object,
+      );
       reject(error);
     }
   });
 }
 
 // Export all types and functions from the module
-export * from "./backend/types";
+export * from "./types";

@@ -3,6 +3,7 @@ import { spawn } from "child_process";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { readFile } from "fs/promises";
+import getPort from "get-port";
 
 // Mock dependencies
 mock.module("child_process", () => ({
@@ -35,10 +36,12 @@ describe("Dev UI", () => {
   let mockBroadcast: ReturnType<typeof mock>;
   let testConfig: DevUIConfig;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockBroadcast = mock();
+    // Use dynamic port allocation to avoid conflicts
+    const port = await getPort();
     testConfig = {
-      port: 4001, // Use different port for testing
+      port, // Use dynamic port
       hostname: "localhost",
       maxLogLines: 10,
       defaultCwd: "/tmp/test-default", // Explicit test default directory
@@ -85,7 +88,7 @@ describe("Dev UI", () => {
       const server = await startDevUI(testConfig);
 
       // Test HTTP request handling
-      const response = await fetch(`http://localhost:${testConfig.port}/`);
+      const response = await fetch(`http://localhost:${server.port}/`);
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toContain("text/html");
 
@@ -96,7 +99,7 @@ describe("Dev UI", () => {
       const server = await startDevUI(testConfig);
 
       const response = await fetch(
-        `http://localhost:${testConfig.port}/api/services-config`,
+        `http://localhost:${server.port}/api/services-config`,
       );
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toContain(
@@ -117,9 +120,7 @@ describe("Dev UI", () => {
     it("should return 404 for unknown paths", async () => {
       const server = await startDevUI(testConfig);
 
-      const response = await fetch(
-        `http://localhost:${testConfig.port}/unknown`,
-      );
+      const response = await fetch(`http://localhost:${server.port}/unknown`);
       expect(response.status).toBe(404);
 
       await server.stop();
@@ -131,7 +132,7 @@ describe("Dev UI", () => {
       const server = await startDevUI(testConfig);
 
       // Create WebSocket connection
-      const ws = new WebSocket(`ws://localhost:${testConfig.port}`);
+      const ws = new WebSocket(`ws://localhost:${server.port}`);
 
       await new Promise((resolve, reject) => {
         ws.onopen = resolve;
@@ -148,7 +149,7 @@ describe("Dev UI", () => {
     it("should send initial state on connection", async () => {
       const server = await startDevUI(testConfig);
 
-      const ws = new WebSocket(`ws://localhost:${testConfig.port}`);
+      const ws = new WebSocket(`ws://localhost:${server.port}`);
 
       const initialMessage = await new Promise((resolve, reject) => {
         ws.onmessage = (event) => {
@@ -178,7 +179,7 @@ describe("Dev UI", () => {
     it("should handle invalid service ID", async () => {
       const server = await startDevUI(testConfig);
 
-      const ws = new WebSocket(`ws://localhost:${testConfig.port}`);
+      const ws = new WebSocket(`ws://localhost:${server.port}`);
 
       await new Promise((resolve) => {
         ws.onopen = resolve;
@@ -218,7 +219,9 @@ describe("Dev UI", () => {
 
   describe("Configuration", () => {
     it("should use default values when not specified", async () => {
+      const port = await getPort();
       const minimalConfig: DevUIConfig = {
+        port, // Use dynamic port to avoid conflicts
         services: [
           {
             id: "minimal-service",
@@ -230,17 +233,15 @@ describe("Dev UI", () => {
 
       const server = await startDevUI(minimalConfig);
       expect(server).toBeDefined();
-
-      // Test that it's running on default port 4000
-      // Note: We can't easily test this without conflicting with other tests
-      // In a real test suite, we'd use a test port manager
+      expect(server.port).toBe(port);
 
       await server.stop();
     });
 
     it("should handle services with minimal configuration", async () => {
+      const port = await getPort();
       const minimalConfig: DevUIConfig = {
-        port: 4002,
+        port,
         services: [
           {
             id: "minimal",
@@ -252,7 +253,9 @@ describe("Dev UI", () => {
 
       const server = await startDevUI(minimalConfig);
 
-      const response = await fetch(`http://localhost:4002/api/services-config`);
+      const response = await fetch(
+        `http://localhost:${server.port}/api/services-config`,
+      );
       const data = await response.json();
 
       expect(data[0]).toMatchObject({
@@ -268,8 +271,9 @@ describe("Dev UI", () => {
   describe("Error Handling", () => {
     it("should handle server startup errors gracefully", async () => {
       // Test that the server can handle configuration errors
+      const port = await getPort();
       const invalidConfig: DevUIConfig = {
-        port: 4003,
+        port,
         services: [
           {
             id: "", // Invalid empty ID
@@ -288,7 +292,7 @@ describe("Dev UI", () => {
     it("should handle malformed WebSocket messages", async () => {
       const server = await startDevUI(testConfig);
 
-      const ws = new WebSocket(`ws://localhost:${testConfig.port}`);
+      const ws = new WebSocket(`ws://localhost:${server.port}`);
 
       await new Promise((resolve) => {
         ws.onopen = resolve;

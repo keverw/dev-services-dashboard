@@ -20,7 +20,11 @@ _Screenshot: Dev UI dashboard showing multiple services_
 - [Features](#features)
 - [Technical Details](#technical-details)
 - [Example](#example)
+- [Demo](#demo)
 - [Development](#development)
+- [Project Structure](#project-structure)
+  - [backend](#backend)
+  - [frontend](#frontend)
 
 <!-- tocstop -->
 
@@ -155,6 +159,30 @@ startDevUI({
 console.log("DevUI started");
 ```
 
+## Demo
+
+Want to see Dev UI in action? We've included a demo with simulated services:
+
+```bash
+# Clone the repository
+git clone https://github.com/keverw/dev-ui.git
+cd dev-ui
+
+# Install dependencies
+bun install
+
+# Run the demo (automatically builds frontend bundle)
+bun run demo
+```
+
+The demo includes three simulated services that generate realistic logs:
+
+- **Database Server**: SQL queries, connection management, and maintenance logs
+- **API Server**: HTTP requests, middleware activity, and error scenarios
+- **SSR Server**: Page rendering, hot reload, and build processes
+
+Open http://localhost:4000 to explore the dashboard and try features like starting/stopping services, viewing real-time logs, and using the "Start All" functionality.
+
 ## Development
 
 Dev UI is built with TypeScript and uses modern JavaScript features.
@@ -168,19 +196,25 @@ bun run build
 
 # Run tests
 bun test
+
+# Run the demo (includes frontend bundle generation)
+bun run demo
 ```
+
+**Note**: The frontend is bundled into a Virtual File System (VFS) during the build process. The generated `src/backend/frontend-vfs.ts` file is git-ignored as it's a build artifact, but it's required for the server to run. The demo command automatically generates this file before starting.
 
 When preparing a new release:
 
 1. Update the version in `package.json`
-2. Run the build command, which will automatically update the README version
+2. Update the `changelog.md` file with the new version and changes
+3. Run the build command, which will automatically build the frontend assets VFS, lib distributable update the README version and changelog TOC
 
 ```bash
 # Build the project (includes README version update)
 bun run build
 ```
 
-The build process uses the `update-readme` script defined in package.json, which runs `scripts/update-readme-version.ts`. This script synchronizes the version number in the README with the one in package.json. Afterwards, you can publish the package to npm:
+The build process uses the `update-readme` and `update-changelog` scripts defined in package.json. The `update-readme` script runs `markdown-toc-gen` to update the table of contents and then runs `scripts/update-readme-version.ts` to synchronize the version number in the README with the one in package.json. The `update-changelog` script also uses `markdown-toc-gen` to update the changelog's table of contents. Afterwards, you can publish the package to npm:
 
 ```bash
 # Publish to npm
@@ -188,3 +222,13 @@ bun publish
 ```
 
 Make sure to commit the new version back to GIT
+
+## Project Structure
+
+### backend
+
+This is where the `startDevUI` is imported from. This is responsible for managing the service underlying processes, the HTTP API and WebSocket Handler.
+
+### frontend
+
+This is where the frontend files are maintained. Currently a single HTML file but in the future could be multiple files using a separately bundler. Then the frontend is turned into a single file, that the backend can export to serve up. This is handled by the `create-frontend-bundle` script, which build will call automatically.
