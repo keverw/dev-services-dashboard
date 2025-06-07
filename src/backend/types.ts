@@ -13,6 +13,15 @@ export interface WebLink {
   url: string;
 }
 
+/**
+ * Logger function type for DevUI
+ */
+export type DevUILoggerFunction = (
+  type: "info" | "error" | "warn",
+  message: string,
+  data?: object,
+) => void;
+
 export interface UserServiceConfig {
   id: string;
   name: string;
@@ -41,6 +50,7 @@ export interface DevUIConfig {
   maxLogLines?: number;
   defaultCwd?: string;
   services: UserServiceConfig[];
+  logger?: DevUILoggerFunction;
 }
 
 export interface DevUIServer {

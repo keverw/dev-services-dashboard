@@ -7,10 +7,15 @@
  * Based on the example from the README.md
  */
 
-import { startDevUI, type UserServiceConfig } from "../src/backend/index";
+import {
+  startDevUI,
+  type UserServiceConfig,
+  createConsoleLogger,
+} from "../src/backend/index";
 
 console.log("🎬 Starting Dev UI Demo...");
 console.log("📖 This demo is based on the example from README.md");
+console.log("🔧 Explicitly using the console logger (no logging by default)");
 console.log("");
 
 const services: UserServiceConfig[] = [
@@ -33,12 +38,16 @@ const services: UserServiceConfig[] = [
   },
 ];
 
+// Explicitly use the console logger (Dev UI doesn't log by default unless you provide a logger)
+const demoLogger = createConsoleLogger(true); // Enable logging for demo
+
 // Start the DevUI
 startDevUI({
   port: 4000,
   hostname: "localhost",
   maxLogLines: 200,
   services,
+  logger: demoLogger,
 });
 
 console.log("");

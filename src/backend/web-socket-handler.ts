@@ -1,16 +1,18 @@
-import { logMessage } from "./utils";
+import { Logger } from "./logger";
 import { ServiceManager } from "./service-manager";
 import { type WebSocket } from "ws";
 
 export class WebSocketHandler {
   private serviceManager: ServiceManager;
+  private logger: Logger;
 
-  constructor(serviceManager: ServiceManager) {
+  constructor(logger: Logger, serviceManager: ServiceManager) {
     this.serviceManager = serviceManager;
+    this.logger = logger;
   }
 
   handleConnection(ws: WebSocket) {
-    logMessage("info", `WebSocket client connected`);
+    this.logger.info(`WebSocket client connected`);
 
     // Send initial state
     this.sendInitialState(ws);
@@ -21,17 +23,17 @@ export class WebSocketHandler {
         const message = JSON.parse(data.toString());
         this.handleMessage(ws, message);
       } catch (err: any) {
-        logMessage("error", "WS message processing error:", err);
+        this.logger.error("WS message processing error:", err);
         this.sendError(ws, `Error: ${err.message}`);
       }
     });
 
     ws.on("close", () => {
-      logMessage("info", "WS client disconnected");
+      this.logger.info("WS client disconnected");
     });
 
     ws.on("error", (err) => {
-      logMessage("error", "WS error:", err);
+      this.logger.error("WS error:", err);
     });
   }
 
@@ -53,10 +55,10 @@ export class WebSocketHandler {
 
   private async handleMessage(ws: WebSocket, data: any) {
     const { action, serviceID } = data;
-    logMessage("info", "WS RCV:", data);
+    this.logger.info("WS RCV:", data);
 
     if (!this.serviceManager.getService(serviceID)) {
-      logMessage("error", `Invalid serviceID: ${serviceID}`);
+      this.logger.error(`Invalid serviceID: ${serviceID}`);
       this.sendError(ws, `Invalid serviceID: ${serviceID}`);
       return;
     }
@@ -75,7 +77,7 @@ export class WebSocketHandler {
         this.serviceManager.clearServiceLogs(serviceID);
         break;
       default:
-        logMessage("warn", `Unknown action: ${action}`);
+        this.logger.warn(`Unknown action: ${action}`);
         this.sendError(ws, `Unknown action: ${action}`);
     }
   }

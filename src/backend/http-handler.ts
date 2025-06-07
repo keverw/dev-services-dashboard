@@ -1,14 +1,16 @@
 import { ServiceManager } from "./service-manager";
-import { logMessage } from "./utils";
+import { Logger } from "./logger";
 import { createVFSMiddleware } from "./vfs-middleware";
 import frontendVFS from "./frontend-vfs";
 
 export class HttpHandler {
   private serviceManager: ServiceManager;
   private vfsMiddleware: (req: any, res: any) => boolean;
+  private logger: Logger;
 
-  constructor(serviceManager: ServiceManager) {
+  constructor(logger: Logger, serviceManager: ServiceManager) {
     this.serviceManager = serviceManager;
+    this.logger = logger;
     this.vfsMiddleware = createVFSMiddleware(frontendVFS, {
       excludedPaths: ["/api/services-config"],
     });
@@ -30,7 +32,7 @@ export class HttpHandler {
         this.handleNotFound(res);
       }
     } catch (error) {
-      logMessage("error", "Error handling HTTP request:", error as object);
+      this.logger.error("Error handling HTTP request:", error as object);
       res.writeHead(500, { "Content-Type": "text/plain" });
       res.end("Internal Server Error");
     }

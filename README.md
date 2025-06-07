@@ -19,6 +19,7 @@ _Screenshot: Dev UI dashboard showing multiple services_
   - [Basic Setup](#basic-setup)
   - [Configuration Options](#configuration-options)
   - [Service Configuration](#service-configuration)
+  - [Logger Configuration](#logger-configuration)
 - [Features](#features)
 - [Technical Details](#technical-details)
 - [Example](#example)
@@ -88,13 +89,14 @@ startDevUI({
 
 The `startDevUI` function accepts a configuration object with the following properties:
 
-| Option        | Type                | Default       | Description                                               |
-| ------------- | ------------------- | ------------- | --------------------------------------------------------- |
-| `port`        | number              | 4000          | The port to run the Dev UI server on                      |
-| `hostname`    | string              | 'localhost'   | The hostname to bind the server to                        |
-| `maxLogLines` | number              | 200           | Maximum number of log lines to keep in memory per service |
-| `defaultCwd`  | string              | process.cwd() | Default working directory for services                    |
-| `services`    | UserServiceConfig[] | required      | Array of service configurations                           |
+| Option        | Type                | Default           | Description                                               |
+| ------------- | ------------------- | ----------------- | --------------------------------------------------------- |
+| `port`        | number              | 4000              | The port to run the Dev UI server on                      |
+| `hostname`    | string              | 'localhost'       | The hostname to bind the server to                        |
+| `maxLogLines` | number              | 200               | Maximum number of log lines to keep in memory per service |
+| `defaultCwd`  | string              | process.cwd()     | Default working directory for services                    |
+| `services`    | UserServiceConfig[] | required          | Array of service configurations                           |
+| `logger`      | DevUILoggerFunction | none (no logging) | Custom logger function for Dev UI internal logs           |
 
 ### Service Configuration
 
@@ -107,6 +109,92 @@ Each service is defined with the following properties:
 | `command` | string[]               | Yes      | Command to run (first element is the executable, rest are arguments) |
 | `cwd`     | string                 | No       | Working directory for the command (defaults to defaultCwd)           |
 | `env`     | Record<string, string> | No       | Environment variables to set for the process                         |
+
+### Logger Configuration
+
+Dev UI supports pluggable logging to integrate with your existing logging infrastructure or to disable logging entirely.
+
+#### No Logging by Default
+
+By default, Dev UI doesn't log anything unless you provide a logger:
+
+```typescript
+import { startDevUI } from "dev-ui";
+
+// No internal logging
+startDevUI({
+  services: [...],
+});
+```
+
+#### Using the Console Logger
+
+To enable console logging, use the provided console logger factory:
+
+```typescript
+import { startDevUI, createConsoleLogger } from "dev-ui";
+
+// Enable console logging
+startDevUI({
+  services: [...],
+  logger: createConsoleLogger(),
+});
+```
+
+#### Creating a Custom Logger
+
+You can provide your own logger function:
+
+```typescript
+import { startDevUI, type DevUILoggerFunction } from "dev-ui";
+
+const customLogger: DevUILoggerFunction = (type, message, data) => {
+  // Integrate with your logging system
+  myLogger.log({
+    level: type,
+    message,
+    data,
+    service: "dev-ui"
+  });
+};
+
+startDevUI({
+  services: [...],
+  logger: customLogger,
+});
+```
+
+#### Using the Console Logger Factory
+
+For easy on/off control of console logging:
+
+```typescript
+import { startDevUI, createConsoleLogger } from "dev-ui";
+
+const LOGGING_ENABLED = process.env.NODE_ENV === "development";
+
+// Create a console logger that can be easily enabled/disabled
+const logger = createConsoleLogger(LOGGING_ENABLED);
+
+startDevUI({
+  services: [...],
+  logger,
+});
+```
+
+#### Disabling Logging
+
+To disable all Dev UI internal logging:
+
+```typescript
+import { startDevUI } from "dev-ui";
+
+// Provide a no-op logger
+startDevUI({
+  services: [...],
+  logger: () => {}, // No logging
+});
+```
 
 ## Features
 

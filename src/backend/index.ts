@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
-import { logMessage } from "./utils";
+import { Logger } from "./logger";
 import { ServiceManager } from "./service-manager";
 import { DevUIConfig, DevUIServer } from "./types";
 import { HttpHandler } from "./http-handler";
@@ -11,6 +11,9 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
   const PORT = config.port || 4000;
   const HOSTNAME = config.hostname || "localhost";
   const MAX_LOG_LINES = config.maxLogLines || 200;
+
+  // Create logger - use provided logger or no logging if none provided
+  const logger = new Logger(config.logger);
 
   return new Promise((resolve, reject) => {
     try {
@@ -27,6 +30,7 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
 
       // Initialize service manager
       const serviceManager = new ServiceManager(
+        logger,
         config.services,
         MAX_LOG_LINES,
         broadcast,
@@ -34,7 +38,7 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
       );
 
       // Initialize HTTP handler
-      const httpHandler = new HttpHandler(serviceManager);
+      const httpHandler = new HttpHandler(logger, serviceManager);
 
       // Create HTTP server
       const httpServer = createServer((req, res) => {
@@ -43,7 +47,7 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
 
       // Create WebSocket server
       wsServer = new WebSocketServer({ server: httpServer });
-      const wsHandler = new WebSocketHandler(serviceManager);
+      const wsHandler = new WebSocketHandler(logger, serviceManager);
 
       wsServer.on("connection", (ws) => {
         wsHandler.handleConnection(ws);
@@ -51,14 +55,13 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
 
       // Shutdown handler
       const handleShutdownSignal = async (signal: string) => {
-        logMessage(
-          "info",
+        logger.info(
           `Received ${signal}. Shutting down Dev UI server and services...`,
         );
 
         await serviceManager.stopAllServices();
 
-        logMessage("info", "Stopping Dev UI HTTP server...");
+        logger.info("Stopping Dev UI HTTP server...");
         httpServer.close();
         wsServer.close();
         process.exit(0);
@@ -73,10 +76,7 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
 
       // Start server
       httpServer.listen(PORT, HOSTNAME, () => {
-        logMessage(
-          "info",
-          `Dev UI server running on http://${HOSTNAME}:${PORT}`,
-        );
+        logger.info(`Dev UI server running on http://${HOSTNAME}:${PORT}`);
 
         resolve({
           httpServer,
@@ -95,19 +95,11 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
       });
 
       httpServer.on("error", (error) => {
-        logMessage(
-          "error",
-          "Fatal error starting Dev UI server:",
-          error as object,
-        );
+        logger.error("Fatal error starting Dev UI server:", error as object);
         reject(error);
       });
     } catch (error) {
-      logMessage(
-        "error",
-        "Fatal error starting Dev UI server:",
-        error as object,
-      );
+      logger.error("Fatal error starting Dev UI server:", error as object);
       reject(error);
     }
   });
@@ -115,3 +107,4 @@ export function startDevUI(config: DevUIConfig): Promise<DevUIServer> {
 
 // Export all types and functions from the module
 export * from "./types";
+export { createConsoleLogger } from "./logger";

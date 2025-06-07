@@ -1,20 +1,23 @@
 import { spawn } from "child_process";
 import { Service, UserServiceConfig, LogEntry } from "./types";
-import { logMessage } from "./utils";
+import { Logger } from "./logger";
 
 export class ServiceManager {
   private services: Service[] = [];
   private maxLogLines: number;
   private broadcastFn: (message: object) => void;
+  private logger: Logger;
 
   constructor(
+    logger: Logger,
     userServices: UserServiceConfig[],
     maxLogLines: number,
     broadcastFn: (message: object) => void,
-    defaultCwd?: string,
+    defaultCwd: string | undefined,
   ) {
     this.maxLogLines = maxLogLines;
     this.broadcastFn = broadcastFn;
+    this.logger = logger;
 
     // Convert user service configs to full service objects
     this.services = userServices.map((userService) => ({
@@ -87,14 +90,13 @@ export class ServiceManager {
       !service ||
       (service.status !== "stopped" && service.status !== "error")
     ) {
-      logMessage(
-        "warn",
+      this.logger.warn(
         `Service ${service?.name} is ${service?.status}, cannot start.`,
       );
       return;
     }
 
-    logMessage("info", `Starting service: ${service.name}...`);
+    this.logger.info(`Starting service: ${service.name}...`);
     service.status = "starting";
     service.errorDetails = null;
     this.broadcastStatus(serviceID, service.status);
@@ -109,8 +111,7 @@ export class ServiceManager {
 
       service.process.on("spawn", () => {
         service.status = "running";
-        logMessage(
-          "info",
+        this.logger.info(
           `Service ${service.name} started (PID: ${service.process?.pid}).`,
         );
         this.addLog(
@@ -130,7 +131,7 @@ export class ServiceManager {
 
       service.process.on("error", (err) => {
         service.status = "error";
-        logMessage("error", `Failed to start service ${service.name}:`, err);
+        this.logger.error(`Failed to start service ${service.name}:`, err);
         this.addLog(
           serviceID,
           `Error starting ${service.name}: ${err.message}`,
@@ -198,14 +199,18 @@ export class ServiceManager {
         const exitMessage = `Service ${service.name} ${exitType} (code ${code}, signal ${signal}).`;
         const logLevel = newStatus === "stopped" ? "info" : "error";
 
-        logMessage(logLevel, exitMessage);
+        if (logLevel === "info") {
+          this.logger.info(exitMessage);
+        } else {
+          this.logger.error(exitMessage);
+        }
         this.addLog(serviceID, exitMessage, "system");
         this.broadcastStatus(serviceID, service.status, service.errorDetails);
         service.process = null;
       });
     } catch (err: any) {
       service.status = "error";
-      logMessage("error", `Exception starting service ${service.name}:`, err);
+      this.logger.error(`Exception starting service ${service.name}:`, err);
       this.addLog(
         serviceID,
         `Exception starting ${service.name}: ${err.message}`,
@@ -233,7 +238,7 @@ export class ServiceManager {
       return;
     }
 
-    logMessage("info", `Stopping service: ${service.name}...`);
+    this.logger.info(`Stopping service: ${service.name}...`);
     service.status = "stopping";
     this.broadcastStatus(serviceID, service.status);
     this.addLog(serviceID, `Attempting to stop ${service.name}...`, "system");
@@ -248,7 +253,7 @@ export class ServiceManager {
 
       service.process.removeAllListeners("exit");
       service.process.on("exit", (code, signal) => {
-        logMessage("info", `Service ${service.name} confirmed stopped.`);
+        this.logger.info(`Service ${service.name} confirmed stopped.`);
         this.addLog(serviceID, `${service.name} confirmed stopped.`, "system");
         if (service.status !== "error") service.status = "stopped";
         this.broadcastStatus(serviceID, service.status, service.errorDetails);
@@ -260,8 +265,7 @@ export class ServiceManager {
       service.process.kill("SIGTERM");
       const timeout = setTimeout(() => {
         if (service.process) {
-          logMessage(
-            "warn",
+          this.logger.warn(
             `Service ${service.name} did not stop gracefully with SIGTERM, sending SIGKILL.`,
           );
           this.addLog(
@@ -279,7 +283,7 @@ export class ServiceManager {
     const service = this.getService(serviceID);
     if (!service) return;
 
-    logMessage("info", `Restarting service: ${service.name}...`);
+    this.logger.info(`Restarting service: ${service.name}...`);
     this.addLog(
       serviceID,
       `Attempting to restart ${service.name}...`,
@@ -301,10 +305,7 @@ export class ServiceManager {
     const service = this.getService(serviceID);
     if (service) {
       service.logs = [];
-      logMessage(
-        "info",
-        `Server-side logs cleared for service: ${service.name}`,
-      );
+      this.logger.info(`Server-side logs cleared for service: ${service.name}`);
       this.addLog(serviceID, "Log buffer cleared by user.", "system");
       this.broadcastFn({ type: "logs_cleared", serviceID });
     }
@@ -318,9 +319,9 @@ export class ServiceManager {
       .map((s) => this.stopService(s.id));
 
     await Promise.all(stopPromises)
-      .then(() => logMessage("info", "All services stopped."))
+      .then(() => this.logger.info("All services stopped."))
       .catch((err) =>
-        logMessage("error", "Error stopping services during shutdown:", err),
+        this.logger.error("Error stopping services during shutdown:", err),
       );
   }
 }
