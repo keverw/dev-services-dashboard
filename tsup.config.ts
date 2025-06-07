@@ -7,7 +7,5 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
-  external: [
-    // Add any external dependencies here if needed
-  ],
+  external: ["get-port", "mime-types", "ws"],
 });

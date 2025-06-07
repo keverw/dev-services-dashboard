@@ -1,8 +1,8 @@
-# Dev Services Dashboard v0.0.1
+# Dev Services Dashboard v0.0.2
 
 [![npm version](https://badge.fury.io/js/dev-services-dashboard.svg)](https://badge.fury.io/js/dev-services-dashboard)
 
-![](icon-thumbnail)
+![](icon-thumbnail.png)
 
 A lightweight development UI dashboard for managing and monitoring multiple services during local development.
 
