@@ -6,10 +6,7 @@
 
 A lightweight development UI dashboard for managing and monitoring multiple services during local development.
 
-![Dev UI Dashboard](https://via.placeholder.com/800x450?text=Dev+UI+Dashboard)
-_Screenshot: Dev UI dashboard showing multiple services_
-
-[todo: include this!!!]
+[![Dev UI dashboard showing multiple services](screenshot.png)](screenshot.png)
 
 <!-- toc -->
 
@@ -28,6 +25,7 @@ _Screenshot: Dev UI dashboard showing multiple services_
 - [Project Structure](#project-structure)
   - [backend](#backend)
   - [frontend](#frontend)
+- [Future Ideas](#future-ideas)
 
 <!-- tocstop -->
 
@@ -322,3 +320,10 @@ This is where the `startDevUI` is imported from. This is responsible for managin
 ### frontend
 
 This is where the frontend files are maintained. Currently a single HTML file but in the future could be multiple files using a separately bundler. Then the frontend is turned into a single file, that the backend can export to serve up. This is handled by the `create-frontend-bundle` script, which build will call automatically.
+
+## Future Ideas
+
+- **Headless Mode**: Support running Dev UI without serving the web interface, ideal for building IDE extensions or integrating with other development tools
+- **React Frontend**: Consider remaking the frontend using React for better maintainability and extensibility
+- **Modern Build Tooling**: If implementing the React frontend, consider using Tailwind CSS for styling and Vite for fast development and building
+- **Dark Mode Support**: Full dark mode theme support for better developer experience during long coding sessions
