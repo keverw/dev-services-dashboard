@@ -204,7 +204,8 @@ header {
 }
 
 .tabs-left {
-  @apply flex overflow-x-auto h-full whitespace-nowrap relative;
+  @apply flex h-full whitespace-nowrap relative;
+  /* overflow-x is controlled dynamically by React component */
   scrollbar-width: none; /* For Firefox */
   -ms-overflow-style: none; /* For IE and Edge */
   scroll-behavior: smooth; /* Smooth scrolling for arrows */
@@ -391,7 +392,7 @@ header {
 }
 
 .service-header {
-  @apply flex justify-between items-center mb-6 pb-4 border-b border-gray-200 dark:border-gray-600 flex-shrink-0;
+  @apply flex justify-between items-center mb-6 pb-4 border-b border-gray-300 dark:border-gray-600 flex-shrink-0;
 }
 
 /* Service content wrapper to allow for flexible height */
@@ -404,7 +405,7 @@ header {
 }
 
 .logs-area {
-  @apply bg-secondary-800 text-gray-100 font-mono text-sm px-6 py-6 rounded-xl overflow-x-auto whitespace-pre-wrap break-all min-h-300 max-h-500 h-500 overflow-y-auto flex-grow-0;
+  @apply bg-secondary-800 text-gray-100 font-mono text-sm px-6 py-6 rounded-xl border border-gray-300 dark:border-gray-600 overflow-x-auto whitespace-pre-wrap break-all min-h-300 max-h-500 h-500 overflow-y-auto flex-grow-0;
 }
 
 .service-title {
@@ -439,7 +440,7 @@ header {
 }
 
 .controls {
-  @apply mb-6 flex items-center flex-wrap gap-1;
+  @apply mb-4 flex items-center flex-wrap gap-1;
 }
 
 .controls button {
@@ -460,7 +461,7 @@ header {
 }
 
 .controls button[id$="-weblink-0"]::before {
-  @apply content-[''] absolute -left-3 top-1/2 -translate-y-1/2 h-7 w-0.5 bg-gray-300;
+  @apply content-[''] absolute -left-3 top-1/2 -translate-y-1/2 h-7 w-0.5 bg-gray-300 dark:bg-gray-600;
 }
 
 /* Mobile adjustments for controls */
@@ -487,11 +488,11 @@ header {
 }
 
 .logs-header-divider {
-  @apply relative flex items-center justify-center py-1 mb-1;
+  @apply relative flex items-center justify-center py-0.5 mb-2;
 }
 
 .logs-header-divider::before {
-  @apply content-[''] absolute left-0 top-1/2 h-px bg-gray-400 dark:bg-gray-500 w-full;
+  @apply content-[''] absolute left-0 top-1/2 h-px bg-gray-300 dark:bg-gray-600 w-full;
 }
 
 .logs-header-divider h3 {
@@ -501,7 +502,7 @@ header {
 }
 
 .log-status-bar {
-  @apply grid grid-cols-[75%_25%] items-center mb-2 w-full;
+  @apply grid grid-cols-[75%_25%] items-center mb-3 w-full;
 }
 
 .auto-scroll-toggle {

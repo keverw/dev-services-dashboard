@@ -1,6 +1,6 @@
 {
   "name": "dev-services-dashboard",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "A lightweight development UI dashboard for managing and monitoring multiple services during local development",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -21,6 +21,7 @@
     "dev-frontend": "cd src/frontend-react && bun run dev",
     "create-frontend-bundle": "bun run scripts/create-vfs.ts",
     "demo": "bun run build-frontend && bun run create-frontend-bundle && bun run scripts/demo.ts",
+    "demo-minimal-tabs": "bun run build-frontend && bun run create-frontend-bundle && bun run scripts/demo-minimal-tabs.ts",
     "test": "bun test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,scss,md,html}\"",
     "lint": "eslint src --ext .ts,.tsx",

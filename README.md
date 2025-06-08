@@ -1,4 +1,4 @@
-# Dev Services Dashboard v0.0.4
+# Dev Services Dashboard v0.0.5
 
 [![npm version](https://badge.fury.io/js/dev-services-dashboard.svg)](https://badge.fury.io/js/dev-services-dashboard)
 
@@ -312,6 +312,9 @@ bun install
 
 # Run the demo (automatically builds frontend bundle)
 bun run demo
+
+# Or run the minimal tabs demo (only 3 services, perfect for testing non-scrolling tab behavior)
+bun run demo-minimal-tabs
 ```
 
 The demo includes simulated services that generate realistic logs:

@@ -18,14 +18,39 @@ function TabNavigation({
 }: TabNavigationProps) {
   const [showLeftArrow, setShowLeftArrow] = useState(false);
   const [showRightArrow, setShowRightArrow] = useState(false);
+  const [needsScroll, setNeedsScroll] = useState(false);
   const tabsRef = useRef<HTMLDivElement>(null);
 
   // Check if scroll arrows are needed
   const checkScrollArrows = () => {
     if (tabsRef.current) {
       const { scrollLeft, scrollWidth, clientWidth } = tabsRef.current;
-      setShowLeftArrow(scrollLeft > 0);
-      setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 1);
+
+      // Simple threshold to prevent trackpad micro-scrolling false positives
+      const scrollThreshold = 10;
+      const hasOverflow = scrollWidth > clientWidth + scrollThreshold;
+
+      // Update scroll state for CSS overflow control
+      // Note: Browsers seem to treat any element with overflow:auto as scrollable, even with no actual overflow.
+      // This allows macOS trackpad to trigger phantom scroll events and show false scroll arrows.
+      // When there are only 3 tabs, there's no real overflow but the system still thinks it's scrollable.
+      // Solution: Dynamically toggle overflow-x between 'hidden' (no scroll) and 'auto' (scrollable)
+      // based on actual content overflow, preventing phantom scrolling entirely.
+      // For the ghost of Steve Jobs - even he couldn't have predicted this trackpad chaos! 👻
+      setNeedsScroll(hasOverflow);
+
+      // Only show arrows if there's actual overflow
+      if (!hasOverflow) {
+        setShowLeftArrow(false);
+        setShowRightArrow(false);
+        return;
+      }
+
+      // Show arrows based on scroll position with threshold
+      setShowLeftArrow(scrollLeft > scrollThreshold);
+      setShowRightArrow(
+        scrollLeft < scrollWidth - clientWidth - scrollThreshold,
+      );
     }
   };
 
@@ -94,6 +119,9 @@ function TabNavigation({
             role="tablist"
             ref={tabsRef}
             onScroll={checkScrollArrows}
+            style={{
+              overflowX: needsScroll ? "auto" : "hidden",
+            }}
           >
             {services.map((service) => {
               const status = serviceStatuses[service.id]?.status || "stopped";
