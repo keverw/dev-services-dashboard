@@ -46,3 +46,15 @@ export interface WebSocketMessage {
 export interface AutoScrollStates {
   [serviceId: string]: boolean;
 }
+
+export type StartAllStatusType =
+  | "idle"
+  | "progress"
+  | "success"
+  | "error"
+  | "warning";
+
+export interface StartAllStatus {
+  message: string;
+  type: StartAllStatusType;
+}

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { ServiceConfig } from "../types";
+import { useToast } from "../contexts/ToastContext";
 
 interface ServiceTabProps {
   service: ServiceConfig;
@@ -29,13 +30,21 @@ function ServiceTab({
   onToggleAutoScroll,
 }: ServiceTabProps) {
   const logsRef = useRef<HTMLPreElement>(null);
+  const { addToast } = useToast();
 
   // Auto-scroll to bottom when logs change and auto-scroll is enabled
   useEffect(() => {
-    if (autoScroll && logsRef.current) {
+    if (autoScroll && logsRef.current && isActive) {
       logsRef.current.scrollTop = logsRef.current.scrollHeight;
     }
-  }, [logs, autoScroll]);
+  }, [logs, autoScroll, isActive]);
+
+  // When tab becomes active, scroll to bottom if auto-scroll is enabled
+  useEffect(() => {
+    if (isActive && autoScroll && logsRef.current) {
+      logsRef.current.scrollTop = logsRef.current.scrollHeight;
+    }
+  }, [isActive, autoScroll]);
 
   const currentStatus = status?.status || "stopped";
   const capitalizedStatus =
@@ -65,7 +74,14 @@ function ServiceTab({
         id={`${service.id}-weblink-${index}`}
         className="web-link-button"
         title={`Open ${link.label}`}
-        onClick={() => window.open(link.url, "_blank")}
+        onClick={() => {
+          window.open(link.url, "_blank");
+          addToast({
+            message: `Opened ${link.label} for ${service.name}`,
+            type: "info",
+            duration: 2000,
+          });
+        }}
       >
         <i>🔗</i>
         {link.label}

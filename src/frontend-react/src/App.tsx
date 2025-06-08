@@ -3,12 +3,15 @@ import { ServiceConfig, WebSocketMessage, AutoScrollStates } from "./types";
 import Header from "./components/Header";
 import TabNavigation from "./components/TabNavigation";
 import ServiceTab from "./components/ServiceTab";
+import ToastContainer from "./components/ToastContainer";
+import { ToastProvider, useToast } from "./contexts/ToastContext";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useKeyboardNavigation } from "./hooks/useKeyboardNavigation";
 
 const MAX_CLIENT_LOGS = 500;
 
-function App() {
+function AppContent() {
+  const { addToast } = useToast();
   const [activeServicesConfig, setActiveServicesConfig] = useState<
     ServiceConfig[]
   >([]);
@@ -28,10 +31,6 @@ function App() {
   const [connectionStatuses, setConnectionStatuses] = useState<{
     [serviceId: string]: { status: string; message: string };
   }>({});
-  const [startAllStatus, setStartAllStatus] = useState<{
-    message: string;
-    color?: string;
-  }>({ message: "" });
 
   const { socket, sendAction } = useWebSocket({
     onMessage: handleWebSocketMessage,
@@ -105,7 +104,7 @@ function App() {
 
     // Start loading immediately
     loadServices();
-  }, [activeTabId]);
+  }, []); // only load once on mount the services config
 
   function handleWebSocketMessage(data: WebSocketMessage) {
     switch (data.type) {
@@ -140,6 +139,35 @@ function App() {
       case "status_update":
         if (data.serviceID && data.status) {
           updateServiceStatus(data.serviceID, data.status, data.errorDetails);
+
+          // Add toast notifications for individual service status changes
+          // (but only if not during "Start All" to avoid duplicate toasts)
+          if (!startAllInProgress) {
+            const service = activeServicesConfig.find(
+              (s) => s.id === data.serviceID,
+            );
+            const serviceName = service?.name || data.serviceID;
+
+            if (data.status === "running") {
+              addToast({
+                message: `${serviceName} started successfully!`,
+                type: "success",
+                duration: 3000, // Increased to match others
+              });
+            } else if (data.status === "stopped") {
+              addToast({
+                message: `${serviceName} stopped`,
+                type: "info",
+                duration: 3000, // Increased to match others
+              });
+            } else if (data.status === "error" || data.status === "crashed") {
+              addToast({
+                message: `${serviceName} ${data.status}: ${data.errorDetails || "Unknown error"}`,
+                type: "error",
+                duration: 5000, // Keep longer for errors
+              });
+            }
+          }
         }
         break;
       case "logs_cleared":
@@ -234,10 +262,14 @@ function App() {
   }
 
   function toggleAutoScroll(serviceID: string) {
-    setAutoScrollStates((prev) => ({
-      ...prev,
-      [serviceID]: !prev[serviceID],
-    }));
+    setAutoScrollStates((prev) => {
+      const currentState =
+        prev[serviceID] !== undefined ? prev[serviceID] : true;
+      return {
+        ...prev,
+        [serviceID]: !currentState,
+      };
+    });
   }
 
   function clearLogs(serviceID: string) {
@@ -252,7 +284,14 @@ function App() {
   }
 
   function startAllServices() {
-    if (startAllInProgress) return;
+    if (startAllInProgress) {
+      // For testing: allow multiple clicks to create multiple toasts
+      addToast({
+        message: "Start All is already in progress...",
+        type: "warning",
+      });
+      return;
+    }
 
     // Reset all state variables to ensure a fresh start
     setStartAllInProgress(false); // Reset first to avoid race conditions
@@ -263,20 +302,18 @@ function App() {
 
     // Check if we're connected to the server
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-      setStartAllStatus({
+      addToast({
         message: "Cannot start services: Not connected to server",
-        color: "#e74c3c",
+        type: "error",
       });
-
-      // Clear the error message after a few seconds
-      setTimeout(() => {
-        setStartAllStatus({ message: "", color: "" });
-      }, 5000);
       return;
     }
 
     setStartAllInProgress(true);
-    setStartAllStatus({ message: "Starting services...", color: "" });
+    addToast({
+      message: "Starting services...",
+      type: "info",
+    });
 
     let currentIndex = 0;
     let startedCount = 0;
@@ -315,9 +352,9 @@ function App() {
         return;
       }
 
-      setStartAllStatus({
+      addToast({
         message: `Starting ${service.name}... (${currentIndex + 1}/${activeServicesConfig.length})`,
-        color: "",
+        type: "info",
       });
 
       // Create a promise that resolves when the service starts or fails
@@ -391,6 +428,13 @@ function App() {
         if (result.success) {
           // Service started successfully
           startedCount++;
+
+          addToast({
+            message: `${service.name} started successfully!`,
+            type: "success",
+            duration: 2000, // Keep shorter for "Start All" to avoid clutter
+          });
+
           currentIndex++;
           startNextService();
         } else {
@@ -398,10 +442,10 @@ function App() {
           failedCount++;
           abortStartAll = true; // Abort starting any more services
 
-          // Show error in status
-          setStartAllStatus({
+          // Show error in toast
+          addToast({
             message: `Failed to start ${service.name}: ${result.errorDetails}`,
-            color: "#e74c3c",
+            type: "error",
           });
 
           // Finish the start all process
@@ -427,28 +471,18 @@ function App() {
       // Update UI
       setStartAllInProgress(false);
 
-      if (abortStartAll) {
-        // We already set the error message when aborting
-        // Just ensure it stays visible longer
-        setTimeout(() => {
-          setStartAllStatus({ message: "", color: "" });
-        }, 8000);
-      } else if (failedCount > 0) {
-        setStartAllStatus({
-          message: `${startedCount} services started, ${failedCount} failed`,
-          color: "#e67e22", // Orange for warning
-        });
-        setTimeout(() => {
-          setStartAllStatus({ message: "", color: "" });
-        }, 5000);
-      } else {
-        setStartAllStatus({
-          message: "All services started!",
-          color: "#2ecc71", // Green for success
-        });
-        setTimeout(() => {
-          setStartAllStatus({ message: "", color: "" });
-        }, 5000);
+      if (!abortStartAll) {
+        if (failedCount > 0) {
+          addToast({
+            message: `${startedCount} services started, ${failedCount} failed`,
+            type: "warning",
+          });
+        } else {
+          addToast({
+            message: "All services started!",
+            type: "success",
+          });
+        }
       }
     }
 
@@ -457,16 +491,18 @@ function App() {
 
   return (
     <>
-      <Header />
+      <Header
+        onStartAll={startAllServices}
+        startAllInProgress={startAllInProgress}
+        hasServices={!isLoading && activeServicesConfig.length > 0}
+      />
       <TabNavigation
         services={isLoading ? [] : activeServicesConfig}
         activeTabId={activeTabId}
         onTabSwitch={switchTab}
-        onStartAll={startAllServices}
-        startAllInProgress={startAllInProgress}
-        startAllStatus={startAllStatus}
         serviceStatuses={serviceStatuses}
       />
+      <ToastContainer />
       <div className="main-content">
         <div className="tab-content-container">
           {isLoading ? (
@@ -521,26 +557,82 @@ function App() {
               </div>
             </div>
           ) : (
-            activeServicesConfig.map((service) => (
-              <ServiceTab
-                key={service.id}
-                service={service}
-                isActive={activeTabId === service.id}
-                status={serviceStatuses[service.id]}
-                connectionStatus={connectionStatuses[service.id]}
-                logs={serviceLogs[service.id] || ""}
-                autoScroll={autoScrollStates[service.id] || false}
-                onStart={() => sendAction(service.id, "start")}
-                onStop={() => sendAction(service.id, "stop")}
-                onRestart={() => sendAction(service.id, "restart")}
-                onClearLogs={() => clearLogs(service.id)}
-                onToggleAutoScroll={() => toggleAutoScroll(service.id)}
-              />
-            ))
+            (() => {
+              const activeService = activeServicesConfig.find(
+                (s) => s.id === activeTabId,
+              );
+              return activeService ? (
+                <ServiceTab
+                  key={activeService.id}
+                  service={activeService}
+                  isActive={true}
+                  status={serviceStatuses[activeService.id]}
+                  connectionStatus={connectionStatuses[activeService.id]}
+                  logs={serviceLogs[activeService.id] || ""}
+                  autoScroll={
+                    autoScrollStates[activeService.id] !== undefined
+                      ? autoScrollStates[activeService.id]
+                      : true
+                  }
+                  onStart={() => {
+                    sendAction(activeService.id, "start");
+                    addToast({
+                      message: `Starting ${activeService.name}...`,
+                      type: "info",
+                      duration: 3000,
+                    });
+                  }}
+                  onStop={() => {
+                    sendAction(activeService.id, "stop");
+                    addToast({
+                      message: `Stopping ${activeService.name}...`,
+                      type: "info",
+                      duration: 3000,
+                    });
+                  }}
+                  onRestart={() => {
+                    sendAction(activeService.id, "restart");
+                    addToast({
+                      message: `Restarting ${activeService.name}...`,
+                      type: "info",
+                      duration: 3000,
+                    });
+                  }}
+                  onClearLogs={() => {
+                    clearLogs(activeService.id);
+                    addToast({
+                      message: `Cleared logs for ${activeService.name}`,
+                      type: "success",
+                      duration: 2000,
+                    });
+                  }}
+                  onToggleAutoScroll={() => {
+                    const currentState =
+                      autoScrollStates[activeService.id] !== undefined
+                        ? autoScrollStates[activeService.id]
+                        : true;
+                    toggleAutoScroll(activeService.id);
+                    addToast({
+                      message: `Auto-scroll ${!currentState ? "enabled" : "disabled"} for ${activeService.name}`,
+                      type: "info",
+                      duration: 1500,
+                    });
+                  }}
+                />
+              ) : null;
+            })()
           )}
         </div>
       </div>
     </>
+  );
+}
+
+function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 }
 

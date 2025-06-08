@@ -19,3 +19,5 @@
 ## 0.0.3 (June 8, 2025)
 
 - Converted the frontend to React instead of Vanilla JS to make future edits easier
+- Better Loading State
+- Tailwind Conversion, UX improvements like if you add a bunch fo tabs
