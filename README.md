@@ -16,6 +16,7 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
   - [Basic Setup](#basic-setup)
   - [Configuration Options](#configuration-options)
   - [Service Configuration](#service-configuration)
+    - [Web Links](#web-links)
   - [Logger Configuration](#logger-configuration)
     - [No Logging by Default](#no-logging-by-default)
     - [Using the Console Logger](#using-the-console-logger)
@@ -28,7 +29,8 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
 - [Development](#development)
 - [Project Structure](#project-structure)
   - [backend](#backend)
-  - [frontend](#frontend)
+  - [frontend-react](#frontend-react)
+  - [frontend-build](#frontend-build)
 - [Future Ideas](#future-ideas)
 
 <!-- tocstop -->
@@ -353,13 +355,8 @@ This is where the React frontend source files are maintained. The frontend is bu
 
 This directory contains the built React application output from Vite. The build process compiles TypeScript, bundles JavaScript, and optimizes assets for production.
 
-### frontend (legacy)
-
-The original HTML/JavaScript frontend implementation. This is kept for reference but the active frontend is now the React version in `frontend-react`.
-
 ## Future Ideas
 
 - **Headless Mode**: Support running Dev Services Dashboard without serving the web interface, ideal for building IDE extensions or integrating with other development tools
 - **Tailwind CSS**: Consider migrating from the current CSS to Tailwind CSS for more maintainable styling
 - **Dark Mode Support**: Full dark mode theme support for better developer experience during long coding sessions
-- **Enhanced TypeScript**: Improve TypeScript configuration for stricter type checking and better development experience

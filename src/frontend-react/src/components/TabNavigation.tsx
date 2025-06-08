@@ -48,21 +48,25 @@ function TabNavigation({
           })}
         </div>
         <div className="global-controls">
-          <button
-            id="start-all-btn"
-            title="Start all services"
-            onClick={onStartAll}
-            disabled={startAllInProgress}
-          >
-            Start All
-          </button>
-          <span
-            id="start-all-status"
-            className="start-all-status"
-            style={{ color: startAllStatus.color }}
-          >
-            {startAllStatus.message}
-          </span>
+          {services.length > 0 && (
+            <>
+              <button
+                id="start-all-btn"
+                title="Start all services"
+                onClick={onStartAll}
+                disabled={startAllInProgress}
+              >
+                Start All
+              </button>
+              <span
+                id="start-all-status"
+                className="start-all-status"
+                style={{ color: startAllStatus.color }}
+              >
+                {startAllStatus.message}
+              </span>
+            </>
+          )}
         </div>
       </div>
     </div>

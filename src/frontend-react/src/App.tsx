@@ -13,6 +13,8 @@ function App() {
     ServiceConfig[]
   >([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [startAllInProgress, setStartAllInProgress] = useState(false);
   const [autoScrollStates, setAutoScrollStates] = useState<AutoScrollStates>(
     {},
@@ -47,15 +49,30 @@ function App() {
 
   // Load services configuration on mount
   useEffect(() => {
-    fetch("/api/services-config")
-      .then((response) => {
+    const MIN_LOADING_TIME = 750; // Minimum loading time in ms
+
+    const loadServices = async () => {
+      const startTime = Date.now();
+
+      try {
+        const response = await fetch("/api/services-config");
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
-        return response.json();
-      })
-      .then((fetchedServicesConfig: ServiceConfig[]) => {
+
+        const fetchedServicesConfig: ServiceConfig[] = await response.json();
+
+        // Calculate remaining time to meet minimum loading duration
+        const elapsedTime = Date.now() - startTime;
+        const remainingTime = Math.max(0, MIN_LOADING_TIME - elapsedTime);
+
+        // Wait for remaining time if needed
+        if (remainingTime > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remainingTime));
+        }
+
         setActiveServicesConfig(fetchedServicesConfig);
+        setLoadError(null); // Clear any previous error
 
         // Initialize auto-scroll states
         const initialAutoScrollStates: AutoScrollStates = {};
@@ -68,10 +85,26 @@ function App() {
         if (fetchedServicesConfig.length > 0 && !activeTabId) {
           setActiveTabId(fetchedServicesConfig[0].id);
         }
-      })
-      .catch((error) => {
+
+        setIsLoading(false);
+      } catch (error: any) {
+        // Calculate remaining time to meet minimum loading duration
+        const elapsedTime = Date.now() - startTime;
+        const remainingTime = Math.max(0, MIN_LOADING_TIME - elapsedTime);
+
+        // Wait for remaining time if needed
+        if (remainingTime > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remainingTime));
+        }
+
         console.error("Error fetching services config:", error);
-      });
+        setLoadError(error.message || "Failed to load services");
+        setIsLoading(false);
+      }
+    };
+
+    // Start loading immediately
+    loadServices();
   }, [activeTabId]);
 
   function handleWebSocketMessage(data: WebSocketMessage) {
@@ -426,7 +459,7 @@ function App() {
     <>
       <Header />
       <TabNavigation
-        services={activeServicesConfig}
+        services={isLoading ? [] : activeServicesConfig}
         activeTabId={activeTabId}
         onTabSwitch={switchTab}
         onStartAll={startAllServices}
@@ -436,22 +469,75 @@ function App() {
       />
       <div className="main-content">
         <div className="tab-content-container">
-          {activeServicesConfig.map((service) => (
-            <ServiceTab
-              key={service.id}
-              service={service}
-              isActive={activeTabId === service.id}
-              status={serviceStatuses[service.id]}
-              connectionStatus={connectionStatuses[service.id]}
-              logs={serviceLogs[service.id] || ""}
-              autoScroll={autoScrollStates[service.id] || false}
-              onStart={() => sendAction(service.id, "start")}
-              onStop={() => sendAction(service.id, "stop")}
-              onRestart={() => sendAction(service.id, "restart")}
-              onClearLogs={() => clearLogs(service.id)}
-              onToggleAutoScroll={() => toggleAutoScroll(service.id)}
-            />
-          ))}
+          {isLoading ? (
+            <div className="tab-content active">
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  height: "400px",
+                  color: "#666",
+                  fontSize: "1.1rem",
+                }}
+              >
+                Loading services...
+              </div>
+            </div>
+          ) : loadError ? (
+            <div className="tab-content active">
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  height: "400px",
+                  color: "#e74c3c",
+                  fontSize: "1.1rem",
+                  textAlign: "center",
+                  gap: "10px",
+                }}
+              >
+                <div>Failed to load services</div>
+                <div style={{ fontSize: "0.9rem", color: "#666" }}>
+                  {loadError}
+                </div>
+              </div>
+            </div>
+          ) : activeServicesConfig.length === 0 ? (
+            <div className="tab-content active">
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  height: "400px",
+                  color: "#888",
+                  fontSize: "1.1rem",
+                }}
+              >
+                No services configured
+              </div>
+            </div>
+          ) : (
+            activeServicesConfig.map((service) => (
+              <ServiceTab
+                key={service.id}
+                service={service}
+                isActive={activeTabId === service.id}
+                status={serviceStatuses[service.id]}
+                connectionStatus={connectionStatuses[service.id]}
+                logs={serviceLogs[service.id] || ""}
+                autoScroll={autoScrollStates[service.id] || false}
+                onStart={() => sendAction(service.id, "start")}
+                onStop={() => sendAction(service.id, "stop")}
+                onRestart={() => sendAction(service.id, "restart")}
+                onClearLogs={() => clearLogs(service.id)}
+                onToggleAutoScroll={() => toggleAutoScroll(service.id)}
+              />
+            ))
+          )}
         </div>
       </div>
     </>
