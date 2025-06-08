@@ -5,6 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dev Services Dashboard</title>
     <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+    <script>
+      // Prevent theme flicker by setting theme class before React loads
+      (function () {
+        function getSystemTheme() {
+          return window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        }
+
+        const themeMode =
+          localStorage.getItem("dev-services-dashboard-theme-mode") || "auto";
+        const theme = themeMode === "auto" ? getSystemTheme() : themeMode;
+
+        if (theme === "dark") {
+          document.documentElement.classList.add("dark");
+          document.documentElement.style.backgroundColor = "#111827"; // Match dark:bg-gray-900
+        } else {
+          document.documentElement.classList.remove("dark");
+          document.documentElement.style.backgroundColor = "#f3f4f6"; // Match bg-gray-100
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

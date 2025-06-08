@@ -20,4 +20,5 @@
 
 - Converted the frontend to React instead of Vanilla JS to make future edits easier
 - Better Loading State
-- Tailwind Conversion, UX improvements like if you add a bunch fo tabs
+- Tailwind Conversion, UX improvements like if you add a bunch fo tabs it will scroll them
+- Dark Mode Support!

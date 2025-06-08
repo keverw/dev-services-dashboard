@@ -80,15 +80,15 @@ function TabNavigation({
   return (
     <div className="tab-container">
       <div className="tab-nav">
+        <button
+          className={`scroll-arrow left ${showLeftArrow ? "" : "hidden"}`}
+          onClick={scrollLeft}
+          title="Scroll tabs left"
+          aria-label="Scroll tabs left"
+        >
+          ‹
+        </button>
         <div className="tabs-scroll-container">
-          <button
-            className={`scroll-arrow left ${showLeftArrow ? "" : "hidden"}`}
-            onClick={scrollLeft}
-            title="Scroll tabs left"
-            aria-label="Scroll tabs left"
-          >
-            ‹
-          </button>
           <div
             className="tabs-left"
             role="tablist"
@@ -117,15 +117,15 @@ function TabNavigation({
               );
             })}
           </div>
-          <button
-            className={`scroll-arrow right ${showRightArrow ? "" : "hidden"}`}
-            onClick={scrollRight}
-            title="Scroll tabs right"
-            aria-label="Scroll tabs right"
-          >
-            ›
-          </button>
         </div>
+        <button
+          className={`scroll-arrow right ${showRightArrow ? "" : "hidden"}`}
+          onClick={scrollRight}
+          title="Scroll tabs right"
+          aria-label="Scroll tabs right"
+        >
+          ›
+        </button>
       </div>
     </div>
   );

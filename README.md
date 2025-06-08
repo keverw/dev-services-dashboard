@@ -358,4 +358,3 @@ This directory contains the built React application output from Vite. The build 
 ## Future Ideas
 
 - **Headless Mode**: Support running Dev Services Dashboard without serving the web interface, ideal for building IDE extensions or integrating with other development tools
-- **Dark Mode Support**: Full dark mode theme support for better developer experience during long coding sessions

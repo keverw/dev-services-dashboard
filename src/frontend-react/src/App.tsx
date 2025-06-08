@@ -5,6 +5,7 @@ import TabNavigation from "./components/TabNavigation";
 import ServiceTab from "./components/ServiceTab";
 import ToastContainer from "./components/ToastContainer";
 import { ToastProvider, useToast } from "./contexts/ToastContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useKeyboardNavigation } from "./hooks/useKeyboardNavigation";
 
@@ -630,9 +631,11 @@ function AppContent() {
 
 function App() {
   return (
-    <ToastProvider>
-      <AppContent />
-    </ToastProvider>
+    <ThemeProvider>
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
+    </ThemeProvider>
   );
 }
 

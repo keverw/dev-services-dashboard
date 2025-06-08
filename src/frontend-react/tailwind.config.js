@@ -54,6 +54,7 @@ export default {
           500: "#718096",
           600: "#4a5568",
           700: "#2d3748",
+          750: "#1f2937", // Custom shade between 700 and 800 for tab differentiation
           800: "#1a202c",
           900: "#171923",
         },

@@ -10,7 +10,7 @@
 }
 
 body {
-  @apply font-sans m-0 p-0 bg-gray-100 text-gray-800 leading-relaxed flex flex-col min-h-screen overflow-x-hidden w-full;
+  @apply font-sans m-0 p-0 bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 leading-relaxed flex flex-col min-h-screen overflow-x-hidden w-full;
 }
 
 /* Focus styles for accessibility */
@@ -177,7 +177,7 @@ header h1 {
 
 /* Tab Navigation Styles */
 .tab-container {
-  @apply bg-white border-b border-gray-300 fixed top-14 left-0 right-0 z-[90] shadow-sm p-0 h-14 box-border flex justify-center;
+  @apply bg-gray-50 dark:bg-gray-750 border-b border-gray-300 dark:border-gray-600 fixed top-14 left-0 right-0 z-[90] shadow-sm p-0 h-14 box-border flex justify-center;
 }
 
 .tab-nav {
@@ -203,7 +203,7 @@ header h1 {
 }
 
 .scroll-arrow {
-  @apply absolute top-1/2 -translate-y-1/2 z-10 bg-white border border-gray-300 rounded-full w-9 h-9 flex items-center justify-center cursor-pointer shadow-sm hover:bg-gray-50 transition-colors;
+  @apply flex-shrink-0 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-full w-9 h-9 flex items-center justify-center cursor-pointer shadow-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors self-center;
   font-size: 14px;
   color: #666;
   min-width: 36px; /* Ensure touch-friendly size */
@@ -215,11 +215,11 @@ header h1 {
 }
 
 .scroll-arrow.left {
-  @apply left-1;
+  @apply mr-2;
 }
 
 .scroll-arrow.right {
-  @apply right-1;
+  @apply ml-2;
 }
 
 .scroll-arrow.hidden {
@@ -325,7 +325,7 @@ header h1 {
 }
 
 .tab-button {
-  @apply bg-transparent border-none border-r border-gray-200 px-3 m-0 cursor-pointer text-sm text-gray-600 whitespace-nowrap relative z-[1] flex-shrink-0 box-border h-full flex items-center;
+  @apply bg-transparent border-none border-r border-gray-200 dark:border-gray-600 px-3 m-0 cursor-pointer text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap relative z-[1] flex-shrink-0 box-border h-full flex items-center;
   transition:
     background-color 0.2s ease,
     color 0.2s ease; /* Only transition colors, not layout properties */
@@ -339,15 +339,15 @@ header h1 {
 }
 
 .tab-button:first-child {
-  @apply border-l border-gray-200;
+  @apply border-l border-gray-200 dark:border-gray-600;
 }
 
 .tab-button:hover {
-  @apply bg-gray-50 text-gray-800;
+  @apply bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-100;
 }
 
 .tab-button.active {
-  @apply text-secondary-800 bg-gray-50 font-medium relative;
+  @apply text-secondary-800 dark:text-primary-400 bg-gray-50 dark:bg-gray-700 font-medium relative;
 }
 
 .tab-button.active::after {
@@ -364,7 +364,7 @@ header h1 {
 }
 
 .tab-content {
-  @apply hidden bg-white rounded-lg shadow-lg px-7 py-7 overflow-hidden w-full flex-1 min-h-500 mb-4;
+  @apply hidden bg-white dark:bg-gray-800 rounded-lg shadow-lg px-7 py-7 overflow-hidden w-full flex-1 min-h-500 mb-4;
 }
 
 .tab-content.active {
@@ -372,7 +372,7 @@ header h1 {
 }
 
 .service-header {
-  @apply flex justify-between items-center mb-6 pb-4 border-b border-gray-200 flex-shrink-0;
+  @apply flex justify-between items-center mb-6 pb-4 border-b border-gray-200 dark:border-gray-600 flex-shrink-0;
 }
 
 /* Service content wrapper to allow for flexible height */
@@ -389,7 +389,7 @@ header h1 {
 }
 
 .service-title {
-  @apply m-0 text-secondary-800 text-3xl;
+  @apply m-0 text-secondary-800 dark:text-gray-100 text-3xl;
 }
 
 .service-status {
@@ -464,7 +464,7 @@ header h1 {
 }
 
 .log-controls h3 {
-  @apply m-0 text-secondary-800 text-lg;
+  @apply m-0 text-secondary-800 dark:text-gray-200 text-lg;
 }
 
 .log-status-bar {
@@ -472,7 +472,7 @@ header h1 {
 }
 
 .auto-scroll-toggle {
-  @apply flex items-center gap-2.5 cursor-pointer select-none text-sm text-secondary-800 leading-none h-[22px] justify-self-end;
+  @apply flex items-center gap-2.5 cursor-pointer select-none text-sm text-secondary-800 dark:text-gray-200 leading-none h-[22px] justify-self-end;
 }
 
 .auto-scroll-toggle:hover {
@@ -488,7 +488,7 @@ header h1 {
 }
 
 .custom-checkbox {
-  @apply w-[18px] h-[18px] bg-white border-2 border-gray-400 rounded-sm inline-flex items-center justify-center relative transition-all flex-shrink-0;
+  @apply w-[18px] h-[18px] bg-white dark:bg-gray-700 border-2 border-gray-400 dark:border-gray-500 rounded-sm inline-flex items-center justify-center relative transition-all flex-shrink-0;
 }
 
 .checkbox-container input[type="checkbox"]:checked + .custom-checkbox {
@@ -533,7 +533,7 @@ header h1 {
 }
 
 .connection-status {
-  @apply flex items-center bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-700 w-fit mr-4;
+  @apply flex items-center bg-gray-50 dark:bg-gray-700 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-200 w-fit mr-4;
 }
 
 .connection-indicator {
@@ -566,7 +566,7 @@ header h1 {
 }
 
 .error-details {
-  @apply text-red-700 bg-red-50 border border-red-200 p-4 rounded mb-4 text-sm whitespace-pre-wrap;
+  @apply text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 rounded mb-4 text-sm whitespace-pre-wrap;
 }
 
 /* Main content area */
@@ -602,7 +602,7 @@ header h1 {
 
   /* Tab content styling */
   .tab-content {
-    @apply hidden bg-white rounded-xl shadow-lg p-6 overflow-hidden w-full min-h-400 mx-auto mb-6 relative left-0 right-0 ml-auto mr-auto;
+    @apply hidden bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 overflow-hidden w-full min-h-400 mx-auto mb-6 relative left-0 right-0 ml-auto mr-auto;
   }
 
   .tab-content.active {
@@ -616,6 +616,22 @@ header h1 {
 
   header h1 {
     @apply w-[92%] mx-auto text-lg text-center;
+  }
+
+  /* Mobile theme toggle adjustments */
+  .theme-toggle-group {
+    @apply relative left-auto top-auto transform-none mb-2;
+    position: static;
+    align-self: flex-start;
+  }
+
+  .header-content {
+    @apply flex-col items-center gap-2 py-1;
+  }
+
+  .theme-toggle-btn {
+    @apply px-2 py-0.5 text-xs;
+    min-width: 35px;
   }
 
   .tab-container {
@@ -634,7 +650,6 @@ header h1 {
   .tabs-scroll-container {
     @apply flex-1; /* On mobile, stretch to fill space */
     max-width: none; /* Remove max-width constraint on mobile */
-    padding: 0 12px; /* Add padding for scroll arrows on mobile */
   }
 
   .tab-button {
@@ -713,7 +728,7 @@ header h1 {
   }
 
   .tab-content {
-    @apply px-3 py-3 min-h-[350px];
+    @apply px-3 py-3 min-h-[350px] bg-white dark:bg-gray-800;
   }
 
   header h1,
@@ -774,4 +789,45 @@ header h1 {
   .tab-content {
     @apply p-6;
   }
+}
+
+.theme-toggle-group {
+  @apply flex items-center flex-shrink-0 gap-1;
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 3px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.theme-toggle-btn {
+  @apply cursor-pointer whitespace-nowrap border-none px-3 py-1.5 text-sm font-medium transition-all duration-200 rounded;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  min-width: 45px;
+  text-align: center;
+  height: 30px; /* Match the Start All button height */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.theme-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+.theme-toggle-btn.active {
+  background: rgba(255, 255, 255, 0.25);
+  color: white;
+  font-weight: 600;
+}
+
+.theme-toggle-btn:focus {
+  @apply outline-none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
 }
