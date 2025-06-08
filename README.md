@@ -13,7 +13,6 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
 - [Overview](#overview)
 - [Usage](#usage)
   - [Quick Setup](#quick-setup)
-  - [Basic Setup](#basic-setup)
   - [Configuration Options](#configuration-options)
   - [Service Configuration](#service-configuration)
     - [Web Links](#web-links)
@@ -52,6 +51,7 @@ Perfect for local development where you need to run multiple interdependent serv
 ### Quick Setup
 
 1. **Install the package:**
+
    ```bash
    bun install dev-services-dashboard
    # or
@@ -61,6 +61,7 @@ Perfect for local development where you need to run multiple interdependent serv
    ```
 
 2. **Create a dev runner script** (e.g., `scripts/dev-ui-runner.ts`):
+
    ```typescript
    import {
      createConsoleLogger,
@@ -100,6 +101,7 @@ Perfect for local development where you need to run multiple interdependent serv
    ```
 
 3. **Add a script to your `package.json`:**
+
    ```json
    {
      "scripts": {
@@ -109,54 +111,22 @@ Perfect for local development where you need to run multiple interdependent serv
    ```
 
 4. **Run your dashboard:**
+
    ```bash
    bun run dev:dashboard
    ```
 
-5. **Open your browser** to `http://localhost:4000` to access the dashboard
+   > **Note**: This example uses Bun, but you can also use Node.js with ts-node or regular JavaScript:
+   >
+   > ```bash
+   > # With ts-node (for TypeScript)
+   > npx ts-node scripts/dev-ui-runner.ts
+   >
+   > # Or with regular Node.js (rename to .js and remove types)
+   > node scripts/dev-ui-runner.js
+   > ```
 
-### Basic Setup
-
-For more detailed configuration, here's the step-by-step breakdown:
-
-1. Import the library and define your services:
-
-```typescript
-import {
-  startDevServicesDashboard,
-  type UserServiceConfig,
-} from "dev-services-dashboard";
-
-// Define your services
-const services: UserServiceConfig[] = [
-  {
-    id: "db",
-    name: "Database",
-    command: ["bun", "run", "scripts/db-server.ts"],
-  },
-  {
-    id: "api",
-    name: "API Server",
-    command: ["bun", "run", "src/apps/api-server/index.ts"],
-    env: { NODE_ENV: "development" },
-    webLinks: [
-      { label: "API Docs", url: "http://localhost:3001/docs" },
-      { label: "Health Check", url: "http://localhost:3001/health" },
-    ],
-  },
-];
-
-// Start the Dev Services Dashboard
-startDevServicesDashboard({
-  port: 4000,
-  hostname: "localhost",
-  maxLogLines: 200,
-  dashboardName: "My Project Dashboard", // Custom dashboard name
-  services,
-});
-```
-
-2. Open your browser to `http://localhost:4000` to access the dashboard (or on your custom defined port)
+5. **Open your browser** to `http://localhost:4000` to access the dashboard (or on your custom defined port)
 
 ### Configuration Options
 
