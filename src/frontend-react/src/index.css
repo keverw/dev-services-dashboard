@@ -32,7 +32,8 @@ body {
 }
 
 header {
-  @apply bg-secondary-800 text-white fixed top-0 left-0 right-0 z-[100] shadow-md box-border flex justify-center items-center;
+  @apply text-white fixed top-0 left-0 right-0 z-[100] shadow-md box-border flex justify-center items-center;
+  background-color: #395a7f;
   height: auto; /* Allow height to adjust based on content */
 }
 
@@ -51,11 +52,11 @@ header {
 
 /* Mobile two-row layout */
 .header-controls-row {
-  @apply flex justify-between items-center w-full px-3 py-3 bg-secondary-800;
+  @apply flex justify-between items-center w-full px-3 py-3;
 }
 
 .header-title-row {
-  @apply w-full px-3 py-3 bg-secondary-800 text-center;
+  @apply w-full px-3 py-3 text-center;
 }
 
 .header-title-row h1 {

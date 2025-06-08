@@ -23,3 +23,4 @@
 - Tailwind Conversion, UX improvements like if you add a bunch fo tabs it will scroll them
 - Dark Mode Support!
 - Custom Dashboard Name: Added `dashboardName` configuration option to customize the dashboard title displayed in the UI and browser tab
+- Branding Color Consistency - Edited Header to use same color as Icon, and edited Icon terminal section to dark the one in dark mode, Border matches dark mode background color
