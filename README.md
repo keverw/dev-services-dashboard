@@ -11,8 +11,8 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
 <!-- toc -->
 
 - [Overview](#overview)
-- [Installation](#installation)
 - [Usage](#usage)
+  - [Quick Setup](#quick-setup)
   - [Basic Setup](#basic-setup)
   - [Configuration Options](#configuration-options)
   - [Service Configuration](#service-configuration)
@@ -47,19 +47,77 @@ Dev Services Dashboard provides a web-based dashboard to:
 
 Perfect for local development where you need to run multiple interdependent services that would typically be separate managed services in production (databases, caches, message queues, microservices, etc.).
 
-## Installation
-
-```bash
-bun install dev-services-dashboard
-# or
-npm add dev-services-dashboard
-# or
-yarn add dev-services-dashboard
-```
-
 ## Usage
 
+### Quick Setup
+
+1. **Install the package:**
+   ```bash
+   bun install dev-services-dashboard
+   # or
+   npm add dev-services-dashboard
+   # or
+   yarn add dev-services-dashboard
+   ```
+
+2. **Create a dev runner script** (e.g., `scripts/dev-ui-runner.ts`):
+   ```typescript
+   import {
+     createConsoleLogger,
+     startDevServicesDashboard,
+     type UserServiceConfig,
+   } from "dev-services-dashboard";
+
+   const services: UserServiceConfig[] = [
+     {
+       id: "db",
+       name: "Database (Postgres)",
+       command: ["bun", "run", "scripts/dev-db.ts"],
+     },
+     {
+       id: "api",
+       name: "API Server",
+       command: ["bun", "run", "src/apps/api-server/index.ts"],
+       env: { NODE_ENV: "development" },
+       webLinks: [
+         { label: "API Docs", url: "http://localhost:3001/docs" },
+         { label: "Health Check", url: "http://localhost:3001/health" },
+       ],
+     },
+   ];
+
+   startDevServicesDashboard({
+     dashboardName: "My Project Dashboard",
+     port: 4000,
+     hostname: "localhost",
+     maxLogLines: 200,
+     defaultCwd: process.cwd(),
+     services,
+     logger: createConsoleLogger(),
+   });
+
+   console.log("Dev Services Dashboard Started!");
+   ```
+
+3. **Add a script to your `package.json`:**
+   ```json
+   {
+     "scripts": {
+       "dev:dashboard": "bun run scripts/dev-ui-runner.ts"
+     }
+   }
+   ```
+
+4. **Run your dashboard:**
+   ```bash
+   bun run dev:dashboard
+   ```
+
+5. **Open your browser** to `http://localhost:4000` to access the dashboard
+
 ### Basic Setup
+
+For more detailed configuration, here's the step-by-step breakdown:
 
 1. Import the library and define your services:
 
