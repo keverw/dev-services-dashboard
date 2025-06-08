@@ -1,6 +1,6 @@
 {
   "name": "dev-services-dashboard",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "A lightweight development UI dashboard for managing and monitoring multiple services during local development",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

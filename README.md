@@ -1,4 +1,4 @@
-# Dev Services Dashboard v0.0.3
+# Dev Services Dashboard v0.0.4
 
 [![npm version](https://badge.fury.io/js/dev-services-dashboard.svg)](https://badge.fury.io/js/dev-services-dashboard)
 
@@ -11,6 +11,7 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
 <!-- toc -->
 
 - [Overview](#overview)
+- [Features](#features)
 - [Usage](#usage)
   - [Quick Setup](#quick-setup)
   - [Configuration Options](#configuration-options)
@@ -21,15 +22,14 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
     - [Using the Console Logger](#using-the-console-logger)
     - [Creating a Custom Logger](#creating-a-custom-logger)
     - [Disabling Logging](#disabling-logging)
-- [Features](#features)
-- [Technical Details](#technical-details)
 - [Example](#example)
 - [Demo](#demo)
 - [Development](#development)
-- [Project Structure](#project-structure)
+  - [Project Structure](#project-structure)
   - [backend](#backend)
   - [frontend-react](#frontend-react)
   - [frontend-build](#frontend-build)
+  - [Technical Details](#technical-details)
 - [Future Goals](#future-goals)
 
 <!-- tocstop -->
@@ -45,6 +45,15 @@ Dev Services Dashboard provides a web-based dashboard to:
 - Define and spin up your entire local development stack (databases, APIs, web servers, etc.)
 
 Perfect for local development where you need to run multiple interdependent services that would typically be separate managed services in production (databases, caches, message queues, microservices, etc.).
+
+## Features
+
+- **Real-time Logs**: View service logs as they happen
+- **Service Controls**: Start, stop, restart services individually or all at once
+- **Status Monitoring**: Visual indicators for service status
+- **Web Links**: Quick access buttons to related URLs (docs, admin panels, health checks, etc.)
+- **Connection Status**: Clear indication of connection state with automatic reconnection
+- **Responsive Design**: Works on desktop and mobile devices
 
 ## Usage
 
@@ -116,15 +125,15 @@ Perfect for local development where you need to run multiple interdependent serv
    bun run dev:dashboard
    ```
 
-   > **Note**: This example uses Bun, but you can also use Node.js with ts-node or regular JavaScript:
-   >
-   > ```bash
-   > # With ts-node (for TypeScript)
-   > npx ts-node scripts/dev-ui-runner.ts
-   >
-   > # Or with regular Node.js (rename to .js and remove types)
-   > node scripts/dev-ui-runner.js
-   > ```
+   **Note**: This Quick Setup example uses Bun, but you can also use Node.js with ts-node or regular JavaScript:
+
+```bash
+# With ts-node (for TypeScript)
+  npx ts-node scripts/dev-ui-runner.ts
+
+ # Or with regular Node.js (rename to .js and remove types)
+ node scripts/dev-ui-runner.js
+```
 
 5. **Open your browser** to `http://localhost:4000` to access the dashboard (or on your custom defined port)
 
@@ -164,7 +173,7 @@ Web links appear as clickable buttons in each service's control panel. Each web 
 | `label`  | string | Yes      | Display text for the link button       |
 | `url`    | string | Yes      | URL to open when the button is clicked |
 
-> **Note**: The URLs in the examples below are for demonstration purposes. Make sure the URLs you configure actually correspond to running services or endpoints that your services expose.
+**Note**: The URLs in the examples below are for demonstration purposes. Make sure the URLs you configure actually correspond to running services or endpoints that your services expose.
 
 ### Logger Configuration
 
@@ -241,24 +250,6 @@ startDevServicesDashboard({
 });
 ```
 
-## Features
-
-- **Real-time Logs**: View service logs as they happen
-- **Service Controls**: Start, stop, restart services individually or all at once
-- **Status Monitoring**: Visual indicators for service status
-- **Web Links**: Quick access buttons to related URLs (docs, admin panels, health checks, etc.)
-- **Connection Status**: Clear indication of connection state with automatic reconnection
-- **Responsive Design**: Works on desktop and mobile devices
-
-## Technical Details
-
-The Dev Services Dashboard consists of:
-
-- An HTTP server using Node's native `http` module that manages service processes and provides a WebSocket API
-- WebSocket communication powered by the `ws` library
-- A web interface that communicates with the server via WebSockets
-- Real-time log streaming from services to the UI
-
 ## Example
 
 ```typescript
@@ -323,7 +314,7 @@ bun install
 bun run demo
 ```
 
-The demo includes three simulated services that generate realistic logs:
+The demo includes simulated services that generate realistic logs:
 
 - **Database Server**: SQL queries, connection management, and maintenance logs
 - **API Server**: HTTP requests, middleware activity, and error scenarios
@@ -374,7 +365,7 @@ bun publish
 
 Make sure to commit the new version back to GIT
 
-## Project Structure
+### Project Structure
 
 ### backend
 
@@ -387,6 +378,15 @@ This is where the React frontend source files are maintained. The frontend is bu
 ### frontend-build
 
 This directory contains the built React application output from Vite. The build process compiles TypeScript, bundles JavaScript, and optimizes assets for production.
+
+### Technical Details
+
+The Dev Services Dashboard consists of:
+
+- An HTTP server using Node's native `http` module that manages service processes and provides a WebSocket API
+- WebSocket communication powered by the `ws` library
+- A web interface that communicates with the server via WebSockets
+- Real-time log streaming from services to the UI
 
 ## Future Goals
 

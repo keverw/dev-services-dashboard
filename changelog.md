@@ -5,6 +5,7 @@
 - [0.0.1 (June 7, 2025)](#001-june-7-2025)
 - [0.0.2 (June 7, 2025)](#002-june-7-2025)
 - [0.0.3 (June 8, 2025)](#003-june-8-2025)
+- [0.0.4 (June 8, 2025)](#004-june-8-2025)
 
 <!-- tocstop -->
 
@@ -24,3 +25,7 @@
 - Dark Mode Support!
 - Custom Dashboard Name: Added `dashboardName` configuration option to customize the dashboard title displayed in the UI and browser tab
 - Branding Color Consistency - Edited Header to use same color as Icon, and edited Icon terminal section to dark the one in dark mode, Border matches dark mode background color
+
+## 0.0.4 (June 8, 2025)
+
+- Version bump to update docs on NPM after better setup guide
