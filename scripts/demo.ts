@@ -23,18 +23,34 @@ const services: UserServiceConfig[] = [
     id: "db",
     name: "Database (PostgreSQL)",
     command: ["bun", "run", "scripts/demo-servers/db-server.ts"],
+    // Note: These are demo URLs - they won't actually work since the demo servers don't expose these endpoints
+    webLinks: [
+      { label: "DB Admin", url: "http://localhost:5432/admin" },
+      { label: "Metrics", url: "http://localhost:5432/metrics" },
+    ],
   },
   {
     id: "api",
     name: "API Server",
     command: ["bun", "run", "scripts/demo-servers/api-server.ts"],
     env: { NODE_ENV: "development" },
+    // Note: These are demo URLs - they won't actually work since the demo servers don't expose these endpoints
+    webLinks: [
+      { label: "API Docs", url: "http://localhost:3001/docs" },
+      { label: "Health Check", url: "http://localhost:3001/health" },
+      { label: "Swagger UI", url: "http://localhost:3001/swagger" },
+    ],
   },
   {
     id: "ssr",
     name: "SSR Server (Main Website)",
     command: ["bun", "run", "scripts/demo-servers/ssr-server.ts"],
     env: { NODE_ENV: "development" },
+    // Note: These are demo URLs - they won't actually work since the demo servers don't expose these endpoints
+    webLinks: [
+      { label: "Website", url: "http://localhost:3000" },
+      { label: "Dev Tools", url: "http://localhost:3000/__dev" },
+    ],
   },
 ];
 
@@ -62,10 +78,12 @@ console.log("  • SSR server with page rendering and hot reload logs");
 console.log("  • Start/stop/restart individual services or all at once");
 console.log("  • Real-time log streaming with auto-scroll");
 console.log("  • Service status indicators and connection monitoring");
+console.log("  • Web link buttons for quick access to related URLs");
 console.log("");
 console.log("💡 Try:");
 console.log("  • Starting and stopping services");
 console.log("  • Using the 'Start All' button");
+console.log("  • Clicking web link buttons (note: demo URLs won't work)");
 console.log("  • Clearing logs for individual services");
 console.log("  • Toggling auto-scroll on/off");
 console.log("  • Switching between service tabs");

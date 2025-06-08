@@ -76,6 +76,10 @@ const services: UserServiceConfig[] = [
     name: "API Server",
     command: ["bun", "run", "src/apps/api-server/index.ts"],
     env: { NODE_ENV: "development" },
+    webLinks: [
+      { label: "API Docs", url: "http://localhost:3001/docs" },
+      { label: "Health Check", url: "http://localhost:3001/health" },
+    ],
   },
 ];
 
@@ -107,13 +111,25 @@ The `startDevServicesDashboard` function accepts a configuration object with the
 
 Each service is defined with the following properties:
 
-| Property  | Type                   | Required | Description                                                          |
-| --------- | ---------------------- | -------- | -------------------------------------------------------------------- |
-| `id`      | string                 | Yes      | Unique identifier for the service                                    |
-| `name`    | string                 | Yes      | Display name for the service                                         |
-| `command` | string[]               | Yes      | Command to run (first element is the executable, rest are arguments) |
-| `cwd`     | string                 | No       | Working directory for the command (defaults to defaultCwd)           |
-| `env`     | Record<string, string> | No       | Environment variables to set for the process                         |
+| Property   | Type                   | Required | Description                                                          |
+| ---------- | ---------------------- | -------- | -------------------------------------------------------------------- |
+| `id`       | string                 | Yes      | Unique identifier for the service                                    |
+| `name`     | string                 | Yes      | Display name for the service                                         |
+| `command`  | string[]               | Yes      | Command to run (first element is the executable, rest are arguments) |
+| `cwd`      | string                 | No       | Working directory for the command (defaults to defaultCwd)           |
+| `env`      | Record<string, string> | No       | Environment variables to set for the process                         |
+| `webLinks` | WebLink[]              | No       | Array of web links to display as buttons in the service UI           |
+
+#### Web Links
+
+Web links appear as clickable buttons in each service's control panel. Each web link is defined with:
+
+| Property | Type   | Required | Description                            |
+| -------- | ------ | -------- | -------------------------------------- |
+| `label`  | string | Yes      | Display text for the link button       |
+| `url`    | string | Yes      | URL to open when the button is clicked |
+
+> **Note**: The URLs in the examples below are for demonstration purposes. Make sure the URLs you configure actually correspond to running services or endpoints that your services expose.
 
 ### Logger Configuration
 
@@ -195,6 +211,7 @@ startDevServicesDashboard({
 - **Real-time Logs**: View service logs as they happen
 - **Service Controls**: Start, stop, restart services individually or all at once
 - **Status Monitoring**: Visual indicators for service status
+- **Web Links**: Quick access buttons to related URLs (docs, admin panels, health checks, etc.)
 - **Connection Status**: Clear indication of connection state with automatic reconnection
 - **Responsive Design**: Works on desktop and mobile devices
 
@@ -221,18 +238,27 @@ const services: UserServiceConfig[] = [
     id: "db",
     name: "Database (Postgres)",
     command: ["bun", "run", "scripts/dev-db.ts"],
+    webLinks: [{ label: "Admin Panel", url: "http://localhost:5432/admin" }],
   },
   {
     id: "api",
     name: "API Server",
     command: ["bun", "run", "src/apps/api-server/index.ts"],
     env: { NODE_ENV: "development" },
+    webLinks: [
+      { label: "API Docs", url: "http://localhost:3001/docs" },
+      { label: "Health Check", url: "http://localhost:3001/health" },
+    ],
   },
   {
     id: "ssr",
     name: "SSR Server (Main Website)",
     command: ["bun", "run", "src/apps/main-website/ssr-server.ts"],
     env: { NODE_ENV: "development" },
+    webLinks: [
+      { label: "Website", url: "http://localhost:3000" },
+      { label: "Dev Tools", url: "http://localhost:3000/__dev" },
+    ],
   },
 ];
 
