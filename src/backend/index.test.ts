@@ -111,11 +111,15 @@ describe("Dev Services Dashboard", () => {
       );
 
       const data = await response.json();
-      expect(data).toBeArray();
-      expect(data[0]).toMatchObject({
-        id: "test-service",
-        name: "Test Service",
-        webLinks: [{ label: "Test Link", url: "http://test.com" }],
+      expect(data).toMatchObject({
+        dashboardName: "Dev Services Dashboard",
+        services: expect.arrayContaining([
+          expect.objectContaining({
+            id: "test-service",
+            name: "Test Service",
+            webLinks: [{ label: "Test Link", url: "http://test.com" }],
+          }),
+        ]),
       });
 
       await server.stop();
@@ -262,10 +266,50 @@ describe("Dev Services Dashboard", () => {
       );
       const data = await response.json();
 
-      expect(data[0]).toMatchObject({
-        id: "minimal",
-        name: "Minimal",
-        webLinks: [],
+      expect(data).toMatchObject({
+        dashboardName: "Dev Services Dashboard",
+        services: expect.arrayContaining([
+          expect.objectContaining({
+            id: "minimal",
+            name: "Minimal",
+            webLinks: [],
+          }),
+        ]),
+      });
+
+      await server.stop();
+    });
+
+    it("should use custom dashboard name when provided", async () => {
+      const port = await getPort();
+      const customConfig: DevUIConfig = {
+        port,
+        dashboardName: "My Custom Dashboard",
+        services: [
+          {
+            id: "test",
+            name: "Test Service",
+            command: ["echo", "test"],
+          },
+        ],
+      };
+
+      const server = await startDevServicesDashboard(customConfig);
+
+      const response = await fetch(
+        `http://localhost:${server.port}/api/services-config`,
+      );
+      const data = await response.json();
+
+      expect(data).toMatchObject({
+        dashboardName: "My Custom Dashboard",
+        services: expect.arrayContaining([
+          expect.objectContaining({
+            id: "test",
+            name: "Test Service",
+            webLinks: [],
+          }),
+        ]),
       });
 
       await server.stop();

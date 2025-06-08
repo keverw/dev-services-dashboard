@@ -22,3 +22,4 @@
 - Better Loading State
 - Tailwind Conversion, UX improvements like if you add a bunch fo tabs it will scroll them
 - Dark Mode Support!
+- Custom Dashboard Name: Added `dashboardName` configuration option to customize the dashboard title displayed in the UI and browser tab

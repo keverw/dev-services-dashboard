@@ -31,7 +31,7 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
   - [backend](#backend)
   - [frontend-react](#frontend-react)
   - [frontend-build](#frontend-build)
-- [Future Ideas](#future-ideas)
+- [Future Goals](#future-goals)
 
 <!-- tocstop -->
 
@@ -43,6 +43,9 @@ Dev Services Dashboard provides a web-based dashboard to:
 - Monitor service logs in real-time
 - Track service status (running, stopped, error, etc.)
 - Manage multiple services from a single interface
+- Define and spin up your entire local development stack (databases, APIs, web servers, etc.)
+
+Perfect for local development where you need to run multiple interdependent services that would typically be separate managed services in production (databases, caches, message queues, microservices, etc.).
 
 ## Installation
 
@@ -90,6 +93,7 @@ startDevServicesDashboard({
   port: 4000,
   hostname: "localhost",
   maxLogLines: 200,
+  dashboardName: "My Project Dashboard", // Custom dashboard name
   services,
 });
 ```
@@ -100,14 +104,15 @@ startDevServicesDashboard({
 
 The `startDevServicesDashboard` function accepts a configuration object with the following properties:
 
-| Option        | Type                               | Default           | Description                                                     |
-| ------------- | ---------------------------------- | ----------------- | --------------------------------------------------------------- |
-| `port`        | number                             | 4000              | The port to run the Dev Services Dashboard server on            |
-| `hostname`    | string                             | 'localhost'       | The hostname to bind the server to                              |
-| `maxLogLines` | number                             | 200               | Maximum number of log lines to keep in memory per service       |
-| `defaultCwd`  | string                             | process.cwd()     | Default working directory for services                          |
-| `services`    | UserServiceConfig[]                | required          | Array of service configurations                                 |
-| `logger`      | DevServicesDashboardLoggerFunction | none (no logging) | Custom logger function for Dev Services Dashboard internal logs |
+| Option          | Type                               | Default                  | Description                                                      |
+| --------------- | ---------------------------------- | ------------------------ | ---------------------------------------------------------------- |
+| `port`          | number                             | 4000                     | The port to run the Dev Services Dashboard server on             |
+| `hostname`      | string                             | 'localhost'              | The hostname to bind the server to                               |
+| `maxLogLines`   | number                             | 200                      | Maximum number of log lines to keep in memory per service        |
+| `defaultCwd`    | string                             | process.cwd()            | Default working directory for services                           |
+| `dashboardName` | string                             | 'Dev Services Dashboard' | Custom name for the dashboard displayed in the UI and page title |
+| `services`      | UserServiceConfig[]                | required                 | Array of service configurations                                  |
+| `logger`        | DevServicesDashboardLoggerFunction | none (no logging)        | Custom logger function for Dev Services Dashboard internal logs  |
 
 ### Service Configuration
 
@@ -355,6 +360,7 @@ This is where the React frontend source files are maintained. The frontend is bu
 
 This directory contains the built React application output from Vite. The build process compiles TypeScript, bundles JavaScript, and optimizes assets for production.
 
-## Future Ideas
+## Future Goals
 
 - **Headless Mode**: Support running Dev Services Dashboard without serving the web interface, ideal for building IDE extensions or integrating with other development tools
+- **Authentication & Security**: Currently designed for local development environments without authentication. Future versions could include optional authentication mechanisms for team environments or remote access scenarios

@@ -49,6 +49,7 @@ export interface DevUIConfig {
   hostname?: string;
   maxLogLines?: number;
   defaultCwd?: string;
+  dashboardName?: string;
   services: UserServiceConfig[];
   logger?: DevServicesDashboardLoggerFunction;
 }

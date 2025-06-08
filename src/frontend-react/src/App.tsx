@@ -1,5 +1,10 @@
 import { useState, useEffect } from "react";
-import { ServiceConfig, WebSocketMessage, AutoScrollStates } from "./types";
+import {
+  ServiceConfig,
+  WebSocketMessage,
+  AutoScrollStates,
+  ServicesConfigResponse,
+} from "./types";
 import Header from "./components/Header";
 import TabNavigation from "./components/TabNavigation";
 import ServiceTab from "./components/ServiceTab";
@@ -16,6 +21,9 @@ function AppContent() {
   const [activeServicesConfig, setActiveServicesConfig] = useState<
     ServiceConfig[]
   >([]);
+  const [dashboardName, setDashboardName] = useState<string>(
+    "Dev Services Dashboard",
+  );
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -60,7 +68,7 @@ function AppContent() {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const fetchedServicesConfig: ServiceConfig[] = await response.json();
+        const configResponse: ServicesConfigResponse = await response.json();
 
         // Calculate remaining time to meet minimum loading duration
         const elapsedTime = Date.now() - startTime;
@@ -71,19 +79,21 @@ function AppContent() {
           await new Promise((resolve) => setTimeout(resolve, remainingTime));
         }
 
-        setActiveServicesConfig(fetchedServicesConfig);
+        setActiveServicesConfig(configResponse.services);
+        setDashboardName(configResponse.dashboardName);
         setLoadError(null); // Clear any previous error
 
         // Initialize auto-scroll states
         const initialAutoScrollStates: AutoScrollStates = {};
-        fetchedServicesConfig.forEach((service) => {
+        configResponse.services.forEach((service) => {
           initialAutoScrollStates[service.id] = true;
         });
+
         setAutoScrollStates(initialAutoScrollStates);
 
         // Set first tab as active
-        if (fetchedServicesConfig.length > 0 && !activeTabId) {
-          setActiveTabId(fetchedServicesConfig[0].id);
+        if (configResponse.services.length > 0 && !activeTabId) {
+          setActiveTabId(configResponse.services[0].id);
         }
 
         setIsLoading(false);
@@ -106,6 +116,11 @@ function AppContent() {
     // Start loading immediately
     loadServices();
   }, []); // only load once on mount the services config
+
+  // Update document title when dashboard name changes
+  useEffect(() => {
+    document.title = dashboardName;
+  }, [dashboardName]);
 
   function handleWebSocketMessage(data: WebSocketMessage) {
     switch (data.type) {
@@ -496,6 +511,7 @@ function AppContent() {
         onStartAll={startAllServices}
         startAllInProgress={startAllInProgress}
         hasServices={!isLoading && activeServicesConfig.length > 0}
+        dashboardName={dashboardName}
       />
       <TabNavigation
         services={isLoading ? [] : activeServicesConfig}

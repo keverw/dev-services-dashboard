@@ -7,10 +7,16 @@ export class HttpHandler {
   private serviceManager: ServiceManager;
   private vfsMiddleware: (req: any, res: any) => boolean;
   private logger: Logger;
+  private dashboardName: string;
 
-  constructor(logger: Logger, serviceManager: ServiceManager) {
+  constructor(
+    logger: Logger,
+    serviceManager: ServiceManager,
+    dashboardName?: string,
+  ) {
     this.serviceManager = serviceManager;
     this.logger = logger;
+    this.dashboardName = dashboardName || "Dev Services Dashboard";
     this.vfsMiddleware = createVFSMiddleware(frontendVFS, {
       excludedPaths: ["/api/services-config"],
     });
@@ -47,7 +53,11 @@ export class HttpHandler {
         webLinks: s.webLinks || [],
       }));
 
-    const response = JSON.stringify(frontendServicesConfig);
+    const response = JSON.stringify({
+      dashboardName: this.dashboardName,
+      services: frontendServicesConfig,
+    });
+
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(response);
   }

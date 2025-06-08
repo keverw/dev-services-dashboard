@@ -40,7 +40,11 @@ export function startDevServicesDashboard(
       );
 
       // Initialize HTTP handler
-      const httpHandler = new HttpHandler(logger, serviceManager);
+      const httpHandler = new HttpHandler(
+        logger,
+        serviceManager,
+        config.dashboardName,
+      );
 
       // Create HTTP server
       const httpServer = createServer((req, res) => {

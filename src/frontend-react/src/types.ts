@@ -58,3 +58,8 @@ export interface StartAllStatus {
   message: string;
   type: StartAllStatusType;
 }
+
+export interface ServicesConfigResponse {
+  dashboardName: string;
+  services: ServiceConfig[];
+}

@@ -32,24 +32,38 @@ body {
 }
 
 header {
-  @apply bg-secondary-800 text-white px-4 py-3 text-center fixed top-0 left-0 right-0 z-[100] shadow-md h-14 box-border flex justify-center items-center;
+  @apply bg-secondary-800 text-white fixed top-0 left-0 right-0 z-[100] shadow-md box-border flex justify-center items-center;
+  height: auto; /* Allow height to adjust based on content */
 }
 
 .header-content {
-  @apply flex w-[90%] max-w-6xl items-center;
-  position: relative; /* For absolute positioning of controls */
+  @apply w-[90%] max-w-6xl;
 }
 
-header h1 {
-  @apply m-0 text-xl font-medium w-full text-center;
+/* Desktop single-row layout */
+.header-single-row {
+  @apply flex justify-between items-center w-full px-4 py-3 h-14 relative;
+}
+
+.header-center-title {
+  @apply m-0 text-xl font-medium text-center absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none;
+}
+
+/* Mobile two-row layout */
+.header-controls-row {
+  @apply flex justify-between items-center w-full px-3 py-3 bg-secondary-800;
+}
+
+.header-title-row {
+  @apply w-full px-3 py-3 bg-secondary-800 text-center;
+}
+
+.header-title-row h1 {
+  @apply m-0 text-lg font-medium;
 }
 
 .header-controls {
   @apply flex items-center gap-2 flex-shrink-0;
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
 }
 
 .start-all-header-btn {
@@ -177,7 +191,11 @@ header h1 {
 
 /* Tab Navigation Styles */
 .tab-container {
-  @apply bg-gray-50 dark:bg-gray-750 border-b border-gray-300 dark:border-gray-600 fixed top-14 left-0 right-0 z-[90] shadow-sm p-0 h-14 box-border flex justify-center;
+  @apply bg-gray-50 dark:bg-gray-750 border-b border-gray-300 dark:border-gray-600 fixed left-0 right-0 z-[90] shadow-sm p-0 h-14 box-border flex justify-center;
+  top: var(
+    --header-height,
+    56px
+  ); /* Dynamic top position based on header height */
 }
 
 .tab-nav {
@@ -460,11 +478,25 @@ header h1 {
 }
 
 .log-controls {
-  @apply flex justify-between items-center mb-2;
+  @apply flex flex-col mb-2;
 }
 
 .log-controls h3 {
   @apply m-0 text-secondary-800 dark:text-gray-200 text-lg;
+}
+
+.logs-header-divider {
+  @apply relative flex items-center justify-center py-1 mb-1;
+}
+
+.logs-header-divider::before {
+  @apply content-[''] absolute left-0 top-1/2 h-px bg-gray-400 dark:bg-gray-500 w-full;
+}
+
+.logs-header-divider h3 {
+  @apply bg-white dark:bg-gray-800 px-4 m-0 text-secondary-800 dark:text-gray-200 text-lg font-medium z-10 relative;
+  /* Ensure it's responsive on mobile */
+  @apply sm:px-6 sm:text-lg text-base;
 }
 
 .log-status-bar {
@@ -571,7 +603,10 @@ header h1 {
 
 /* Main content area */
 .main-content {
-  @apply flex flex-col min-h-screen pt-28 items-center w-full overflow-x-hidden m-0 p-0;
+  @apply w-full pb-6 m-0 flex flex-col items-center;
+  padding-top: calc(
+    var(--header-height, 56px) + 56px + 20px
+  ); /* Dynamic padding based on header height + tabs + margin */
 }
 
 /* Larger screens */
@@ -592,7 +627,9 @@ header h1 {
 
   .main-content {
     @apply w-full pb-6 m-0 flex flex-col items-center;
-    padding-top: 6rem; /* 2.5rem header + 3.5rem tab container */
+    padding-top: calc(
+      var(--header-height, 56px) + 56px + 20px
+    ); /* Dynamic padding based on header height + tabs + margin */
   }
 
   /* Centered container with equal padding */
@@ -609,47 +646,19 @@ header h1 {
     @apply flex flex-col;
   }
 
-  /* Header and tabs positioning */
-  header {
-    @apply h-10 p-2 text-center;
-  }
-
-  header h1 {
-    @apply w-[92%] mx-auto text-lg text-center;
-  }
-
   /* Mobile theme toggle adjustments */
-  .theme-toggle-group {
-    @apply relative left-auto top-auto transform-none mb-2;
-    position: static;
-    align-self: flex-start;
-  }
-
-  .header-content {
-    @apply flex-col items-center gap-2 py-1;
-  }
-
   .theme-toggle-btn {
     @apply px-2 py-0.5 text-xs;
     min-width: 35px;
-  }
-
-  .tab-container {
-    @apply top-10;
-    height: 6rem; /* Fixed height: 3rem for controls + 3rem for tabs */
   }
 
   .tab-nav {
     @apply w-[92%] mx-auto flex px-0 h-full;
   }
 
-  .tab-container {
-    height: 3.5rem; /* Single row height */
-  }
-
   .tabs-scroll-container {
-    @apply flex-1; /* On mobile, stretch to fill space */
-    max-width: none; /* Remove max-width constraint on mobile */
+    @apply flex-1 overflow-x-auto;
+    max-width: 100%;
   }
 
   .tab-button {
@@ -677,7 +686,7 @@ header h1 {
   }
 
   .log-controls {
-    @apply flex-col items-center gap-2 mb-3;
+    @apply flex-col mb-3;
   }
 
   .log-status-bar {
@@ -716,7 +725,9 @@ header h1 {
 @media (max-width: 480px) {
   .main-content {
     @apply pb-4;
-    padding-top: 6rem; /* Keep consistent with larger mobile */
+    padding-top: calc(
+      var(--header-height, 56px) + 56px + 20px
+    ); /* Dynamic padding based on header height + tabs + margin */
   }
 
   .tab-content-container {
@@ -749,7 +760,7 @@ header h1 {
   }
 
   .log-controls {
-    @apply flex-col items-center gap-2 mb-3;
+    @apply flex-col mb-3;
   }
 
   .tab-button {
@@ -793,10 +804,6 @@ header h1 {
 
 .theme-toggle-group {
   @apply flex items-center flex-shrink-0 gap-1;
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
   background: rgba(255, 255, 255, 0.1);
   border-radius: 6px;
   padding: 3px;

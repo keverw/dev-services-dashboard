@@ -193,6 +193,7 @@ startDevServicesDashboard({
   port: 4000,
   hostname: "localhost",
   maxLogLines: 200,
+  dashboardName: "My Development Environment",
   services,
   logger: demoLogger,
 });

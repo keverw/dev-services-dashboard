@@ -161,7 +161,9 @@ function ServiceTab({
 
         <div className="logs-container">
           <div className="log-controls">
-            <h3>Logs</h3>
+            <div className="logs-header-divider">
+              <h3>Logs</h3>
+            </div>
           </div>
 
           <div className="log-status-bar">
