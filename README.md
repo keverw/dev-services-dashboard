@@ -304,7 +304,7 @@ Dev Services Dashboard is built with TypeScript and uses modern JavaScript featu
 # Install dependencies
 bun install
 
-# Build the project
+# Build the project (includes React frontend build)
 bun run build
 
 # Run tests
@@ -312,9 +312,12 @@ bun test
 
 # Run the demo (includes frontend bundle generation)
 bun run demo
+
+# Develop the React frontend with hot reload
+bun run dev-frontend
 ```
 
-**Note**: The frontend is bundled into a Virtual File System (VFS) during the build process. The generated `src/backend/frontend-vfs.ts` file is git-ignored as it's a build artifact, but it's required for the server to run. The demo command automatically generates this file before starting.
+**Note**: The React frontend is built using Vite and then bundled into a Virtual File System (VFS) during the build process. The generated `src/backend/frontend-vfs.ts` file is git-ignored as it's a build artifact, but it's required for the server to run. The demo command automatically builds the React frontend and generates this file before starting.
 
 When preparing a new release:
 
@@ -327,7 +330,7 @@ When preparing a new release:
 bun run build
 ```
 
-The build process uses the `update-readme` and `update-changelog` scripts defined in package.json. The `update-readme` script runs `markdown-toc-gen` to update the table of contents and then runs `scripts/update-readme-version.ts` to synchronize the version number in the README with the one in package.json. The `update-changelog` script also uses `markdown-toc-gen` to update the changelog's table of contents. Afterwards, you can publish the package to npm:
+The build process first builds the React frontend using Vite, then creates the VFS bundle, and finally builds the backend library. It also uses the `update-readme` and `update-changelog` scripts defined in package.json. The `update-readme` script runs `markdown-toc-gen` to update the table of contents and then runs `scripts/update-readme-version.ts` to synchronize the version number in the README with the one in package.json. The `update-changelog` script also uses `markdown-toc-gen` to update the changelog's table of contents. Afterwards, you can publish the package to npm:
 
 ```bash
 # Publish to npm
@@ -342,13 +345,21 @@ Make sure to commit the new version back to GIT
 
 This is where the `startDevServicesDashboard` is imported from. This is responsible for managing the service underlying processes, the HTTP API and WebSocket Handler.
 
-### frontend
+### frontend-react
 
-This is where the frontend files are maintained. Currently a single HTML file but in the future could be multiple files using a separately bundler. Then the frontend is turned into a single file, that the backend can export to serve up. This is handled by the `create-frontend-bundle` script, which build will call automatically.
+This is where the React frontend source files are maintained. The frontend is built using Vite and TypeScript, providing a modern development experience with hot module replacement and type safety.
+
+### frontend-build
+
+This directory contains the built React application output from Vite. The build process compiles TypeScript, bundles JavaScript, and optimizes assets for production.
+
+### frontend (legacy)
+
+The original HTML/JavaScript frontend implementation. This is kept for reference but the active frontend is now the React version in `frontend-react`.
 
 ## Future Ideas
 
 - **Headless Mode**: Support running Dev Services Dashboard without serving the web interface, ideal for building IDE extensions or integrating with other development tools
-- **React Frontend**: Consider remaking the frontend using React for better maintainability and extensibility
-- **Modern Build Tooling**: If implementing the React frontend, consider using Tailwind CSS for styling and Vite for fast development and building
+- **Tailwind CSS**: Consider migrating from the current CSS to Tailwind CSS for more maintainable styling
 - **Dark Mode Support**: Full dark mode theme support for better developer experience during long coding sessions
+- **Enhanced TypeScript**: Improve TypeScript configuration for stricter type checking and better development experience

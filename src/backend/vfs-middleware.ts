@@ -66,9 +66,9 @@ export function createVFSMiddleware(
       return false;
     }
 
-    // Map root path to dev-ui.html
+    // Map root path to index.html (React build output)
     if (path === "" || path === "/") {
-      path = "dev-ui.html";
+      path = "index.html";
     }
 
     // Try to find the file in VFS
