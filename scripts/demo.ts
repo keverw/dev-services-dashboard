@@ -57,7 +57,7 @@ const services: UserServiceConfig[] = [
     // Custom signals appear as a "Send signal…" dropdown while running.
     signals: [
       { label: "Reload config", signal: "SIGHUP" },
-      { label: "Reopen logs", signal: "SIGUSR1" },
+      { label: "Reopen logs", signal: "SIGUSR2" },
     ],
     // Pre-start hook: runs before the process spawns. It can log to the
     // service stream, react to an abort if stopped mid-init, and return a
@@ -80,7 +80,8 @@ const services: UserServiceConfig[] = [
 
       log("Pre-start: configuration ready.");
       // Return a modified env, and demonstrate rewriting the web links by
-      // appending one resolved at launch time.
+      // adding one resolved at launch time. `webLinks` here is the configured
+      // baseline, so this stays idempotent across restarts.
       return {
         env: { ...env, API_WARMED_UP: "true" },
         webLinks: [

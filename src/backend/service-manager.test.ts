@@ -514,7 +514,7 @@ describe("ServiceManager — beforeStart hook", () => {
     expect(env.CUSTOM).toBe("yes");
   });
 
-  it("applies web links returned by the hook and broadcasts them", async () => {
+  it("applies web links returned by the hook (as liveWebLinks) and broadcasts them", async () => {
     const { sm, broadcasts } = makeManager([
       svc("a", {
         webLinks: [{ label: "Original", url: "http://x/1" }],
@@ -524,13 +524,37 @@ describe("ServiceManager — beforeStart hook", () => {
       }),
     ]);
     await startAndRun(sm, "a");
+    // The configured baseline is untouched; the hook's result is the live set.
     expect(sm.getService("a")?.webLinks).toEqual([
+      { label: "Original", url: "http://x/1" },
+    ]);
+    expect(sm.getService("a")?.liveWebLinks).toEqual([
       { label: "Original", url: "http://x/1" },
       { label: "Added", url: "http://x/2" },
     ]);
     expect(
       broadcasts.some((b) => b.type === "links_update" && b.serviceID === "a"),
     ).toBe(true);
+  });
+
+  it("does not accumulate hook-added links across restarts", async () => {
+    const { sm } = makeManager([
+      svc("a", {
+        webLinks: [{ label: "Original", url: "http://x/1" }],
+        beforeStart: async ({ webLinks }) => ({
+          webLinks: [...webLinks, { label: "Added", url: "http://x/2" }],
+        }),
+      }),
+    ]);
+    await startAndRun(sm, "a");
+    await sm.stopService("a");
+    await startAndRun(sm, "a");
+    // The hook always sees the configured baseline, so a second run yields the
+    // same two links — not three.
+    expect(sm.getService("a")?.liveWebLinks).toEqual([
+      { label: "Original", url: "http://x/1" },
+      { label: "Added", url: "http://x/2" },
+    ]);
   });
 
   it("hook logging produces a system log entry", async () => {

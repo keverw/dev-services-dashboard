@@ -51,7 +51,7 @@ export class HttpHandler {
       .map((s) => ({
         id: s.id,
         name: s.name,
-        webLinks: s.webLinks || [],
+        webLinks: s.liveWebLinks ?? s.webLinks ?? [],
         signals: s.signals || [],
         dependsOn: s.dependsOn || [],
       }));

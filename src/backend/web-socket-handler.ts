@@ -47,7 +47,7 @@ export class WebSocketHandler {
         status: s.status,
         logs: s.logs,
         errorDetails: s.errorDetails,
-        webLinks: s.webLinks || [],
+        webLinks: s.liveWebLinks ?? s.webLinks ?? [],
         signals: s.signals || [],
         dependsOn: s.dependsOn || [],
       })),

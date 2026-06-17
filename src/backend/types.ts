@@ -84,7 +84,14 @@ export interface Service {
   command: string[];
   cwd: string;
   env?: Record<string, string>;
+  /** The configured web links (immutable baseline passed to `beforeStart`). */
   webLinks?: WebLink[];
+  /**
+   * Web links set by the last `beforeStart` run, overriding `webLinks` for
+   * display. Kept separate so the hook always receives the configured baseline
+   * and additive patterns (`[...webLinks, x]`) don't accumulate across restarts.
+   */
+  liveWebLinks?: WebLink[];
   signals?: ServiceSignal[];
   dependsOn?: string[];
   beforeStart?: (ctx: BeforeStartContext) => Promise<BeforeStartResult | void>;

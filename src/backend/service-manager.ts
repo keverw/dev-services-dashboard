@@ -255,7 +255,9 @@ export class ServiceManager {
       try {
         const result = await service.beforeStart({
           env: mergedEnv,
-          webLinks: service.webLinks ?? [],
+          // Always the configured baseline (a copy), so the hook can't see —
+          // and accumulate on top of — links it added on a previous run.
+          webLinks: [...(service.webLinks ?? [])],
           log: (line: string) => this.addLog(serviceID, line, "system"),
           signal: controller.signal,
         });
@@ -267,10 +269,12 @@ export class ServiceManager {
           return;
         }
 
-        // Apply any env / web link overrides the hook returned.
+        // Apply any env / web link overrides the hook returned. Links go into
+        // `liveWebLinks` (display) rather than overwriting the configured
+        // baseline `webLinks`.
         if (result?.env) mergedEnv = result.env;
         if (result?.webLinks) {
-          service.webLinks = result.webLinks;
+          service.liveWebLinks = result.webLinks;
           this.broadcastFn({
             type: "links_update",
             serviceID,
