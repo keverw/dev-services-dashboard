@@ -719,7 +719,9 @@ function AppContent() {
       />
       <ToastContainer />
       <div className="main-content">
-        <div className="tab-content-container">
+        <div
+          className={`tab-content-container ${isLoading ? "" : "loaded"}`}
+        >
           {isLoading ? (
             <div className="tab-content active">
               <div

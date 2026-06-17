@@ -609,6 +609,32 @@ header {
   @apply bg-gray-600;
 }
 
+/* Gentle fade-in for the UI that appears once services finish loading
+   (header controls, tabs, and the main content) so it doesn't pop in.
+   Pure opacity — no movement — so it eases in rather than dropping in. */
+@keyframes uiFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.header-controls {
+  animation: uiFadeIn 0.4s ease both;
+}
+
+.tab-button {
+  animation: uiFadeIn 0.5s ease both;
+}
+
+/* Slight delay so the content settles in just after the chrome — a subtle
+   cascade rather than everything at the same instant. */
+.tab-content-container.loaded {
+  animation: uiFadeIn 0.5s ease 0.1s both;
+}
+
 /* Service overview grid */
 .overview {
   @apply p-4;
