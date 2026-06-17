@@ -41,3 +41,6 @@
   - Unified border colors to use `gray-300` (light) and `gray-600` (dark) for service headers, button separators, logs dividers, and logs area
   - Added consistent border styling to logs area for better visual definition
   - Improved spacing balance around logs section divider and controls for better visual hierarchy
+
+## 0.1.0 (June XXXX, 2026) (UNRELEASED)
+
