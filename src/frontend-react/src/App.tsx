@@ -27,6 +27,9 @@ function AppContent() {
   );
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [showOverview, setShowOverview] = useState(false);
+  const [connected, setConnected] = useState(false);
+  // Id of the sticky "Disconnected" toast, so we can remove it on reconnect.
+  const disconnectToastIdRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [startAllInProgress, setStartAllInProgress] = useState(false);
@@ -227,12 +230,27 @@ function AppContent() {
   }
 
   function handleWebSocketOpen() {
+    setConnected(true);
+    // Clear the sticky "Disconnected" toast now that we're back.
+    if (disconnectToastIdRef.current) {
+      removeToast(disconnectToastIdRef.current);
+      disconnectToastIdRef.current = null;
+    }
     activeServicesConfig.forEach((service) => {
       updateConnectionStatus(service.id, "connected", "Connected");
     });
   }
 
   function handleWebSocketClose() {
+    setConnected(false);
+    // Show a single sticky toast until we reconnect.
+    if (!disconnectToastIdRef.current) {
+      disconnectToastIdRef.current = addToast({
+        message: "Disconnected from server — reconnecting…",
+        type: "error",
+        duration: 0,
+      });
+    }
     activeServicesConfig.forEach((service) => {
       updateServiceStatus(service.id, "stopped", "Disconnected");
       updateConnectionStatus(
@@ -244,6 +262,7 @@ function AppContent() {
   }
 
   function handleWebSocketError() {
+    setConnected(false);
     activeServicesConfig.forEach((service) => {
       updateConnectionStatus(service.id, "disconnected", "Connection error");
     });
@@ -706,8 +725,8 @@ function AppContent() {
         onStopAll={stopAllServices}
         onToggleOverview={() => setShowOverview((v) => !v)}
         overviewActive={showOverview}
-        startAllInProgress={startAllInProgress}
-        stopAllDisabled={!hasActiveServices}
+        startAllInProgress={startAllInProgress || !connected}
+        stopAllDisabled={!hasActiveServices || !connected}
         hasServices={!isLoading && activeServicesConfig.length > 0}
         dashboardName={dashboardName}
       />
@@ -789,6 +808,7 @@ function AppContent() {
                   key={activeService.id}
                   service={activeService}
                   isActive={true}
+                  connected={connected}
                   status={serviceStatuses[activeService.id]}
                   connectionStatus={connectionStatuses[activeService.id]}
                   logs={serviceLogs[activeService.id] || ""}

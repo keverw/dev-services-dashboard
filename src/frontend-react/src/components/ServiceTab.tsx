@@ -5,6 +5,7 @@ import { useToast } from "../contexts/ToastContext";
 interface ServiceTabProps {
   service: ServiceConfig;
   isActive: boolean;
+  connected?: boolean;
   status?: { status: string; errorDetails?: string };
   connectionStatus?: { status: string; message: string };
   logs: string;
@@ -20,6 +21,7 @@ interface ServiceTabProps {
 function ServiceTab({
   service,
   isActive,
+  connected = true,
   status,
   connectionStatus,
   logs,
@@ -52,22 +54,26 @@ function ServiceTab({
   const capitalizedStatus =
     currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1);
 
+  // All process-control actions require a live server connection.
   const isStartDisabled =
+    !connected ||
     currentStatus === "running" ||
     currentStatus === "initializing" ||
     currentStatus === "starting" ||
     currentStatus === "stopping";
   const isStopDisabled =
+    !connected ||
     currentStatus === "stopped" ||
     currentStatus === "error" ||
     currentStatus === "crashed" ||
     currentStatus === "starting" ||
     currentStatus === "stopping";
   const isRestartDisabled =
+    !connected ||
     currentStatus === "initializing" ||
     currentStatus === "starting" ||
     currentStatus === "stopping";
-  const isSignalDisabled = currentStatus !== "running";
+  const isSignalDisabled = !connected || currentStatus !== "running";
 
   const createWebLinkButtons = () => {
     if (!service.webLinks || service.webLinks.length === 0) {
