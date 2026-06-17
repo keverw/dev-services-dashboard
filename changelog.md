@@ -44,3 +44,13 @@
 
 ## 0.1.0 (June XXXX, 2026) (UNRELEASED)
 
+### Build / tooling
+- Added `typecheck` script (`tsc --noEmit`) for backend TypeScript validation
+- Added `prepublishOnly` script — runs lint, typecheck, audit, and build before every publish
+- Upgraded all devDependencies to latest (ESLint 10, Vite 8, tsup, @typescript-eslint 8, etc.)
+- Upgraded `ws` runtime dependency to 8.21.0 (security fixes)
+- Added `overrides` for `rollup`, `esbuild`, `picomatch`, `flatted`, `@babel/core` to resolve transitive devDep vulnerabilities — `bun audit` now reports no vulnerabilities
+- Created `eslint.config.mjs` (ESLint v9+ flat config) with TypeScript, React, React Hooks, and jsx-a11y rules
+- Fixed `tsconfig.json` to exclude `src/frontend-react` (which has its own tsconfig/Vite toolchain) so `tsc --noEmit` only checks the published library code
+- Fixed pre-existing lint errors surfaced by the new config (`any` types, unused vars, `ToastContext` forward-reference bug)
+

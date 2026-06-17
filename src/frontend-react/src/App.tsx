@@ -97,7 +97,7 @@ function AppContent() {
         }
 
         setIsLoading(false);
-      } catch (error: any) {
+      } catch (error) {
         // Calculate remaining time to meet minimum loading duration
         const elapsedTime = Date.now() - startTime;
         const remainingTime = Math.max(0, MIN_LOADING_TIME - elapsedTime);
@@ -312,10 +312,6 @@ function AppContent() {
     // Reset all state variables to ensure a fresh start
     setStartAllInProgress(false); // Reset first to avoid race conditions
 
-    // Clear any existing timeouts
-    const statusKey = "start-all-status";
-    // Note: In React we don't need statusMessageTimeouts Map, we use state cleanup
-
     // Check if we're connected to the server
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       addToast({
@@ -427,7 +423,7 @@ function AppContent() {
       sendAction(service.id, "start");
 
       // Wait for the service to start or fail
-      startPromise.then((result: any) => {
+      startPromise.then((result: { success: boolean; errorDetails?: string }) => {
         // Clean up listeners and timeouts
         const serviceData = serviceStartPromises.get(service.id);
         if (serviceData && socket) {
@@ -472,7 +468,7 @@ function AppContent() {
 
     function finishStartAll() {
       // Clean up any remaining listeners and timeouts
-      for (const [serviceID, serviceData] of serviceStartPromises.entries()) {
+      for (const [, serviceData] of serviceStartPromises.entries()) {
         if (socket) {
           socket.removeEventListener("message", serviceData.listener);
         }

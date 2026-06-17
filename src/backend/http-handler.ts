@@ -1,3 +1,4 @@
+import { IncomingMessage, ServerResponse } from "http";
 import { ServiceManager } from "./service-manager";
 import { Logger } from "./logger";
 import { createVFSMiddleware } from "./vfs-middleware";
@@ -5,7 +6,10 @@ import frontendVFS from "./frontend-vfs";
 
 export class HttpHandler {
   private serviceManager: ServiceManager;
-  private vfsMiddleware: (req: any, res: any) => boolean;
+  private vfsMiddleware: (
+    req: IncomingMessage,
+    res: ServerResponse,
+  ) => boolean;
   private logger: Logger;
   private dashboardName: string;
 
@@ -22,7 +26,7 @@ export class HttpHandler {
     });
   }
 
-  async handleRequest(req: any, res: any) {
+  async handleRequest(req: IncomingMessage, res: ServerResponse) {
     const url = new URL(req.url!, `http://${req.headers.host}`);
 
     try {
@@ -44,7 +48,7 @@ export class HttpHandler {
     }
   }
 
-  private async handleServicesConfig(res: any) {
+  private async handleServicesConfig(res: ServerResponse) {
     const frontendServicesConfig = this.serviceManager
       .getServices()
       .map((s) => ({
@@ -62,7 +66,7 @@ export class HttpHandler {
     res.end(response);
   }
 
-  private handleNotFound(res: any) {
+  private handleNotFound(res: ServerResponse) {
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("Not Found");
   }

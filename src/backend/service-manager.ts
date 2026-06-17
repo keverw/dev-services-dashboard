@@ -208,15 +208,19 @@ export class ServiceManager {
         this.broadcastStatus(serviceID, service.status, service.errorDetails);
         service.process = null;
       });
-    } catch (err: any) {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       service.status = "error";
-      this.logger.error(`Exception starting service ${service.name}:`, err);
+      this.logger.error(
+        `Exception starting service ${service.name}:`,
+        err as object,
+      );
       this.addLog(
         serviceID,
-        `Exception starting ${service.name}: ${err.message}`,
+        `Exception starting ${service.name}: ${message}`,
         "system",
       );
-      this.broadcastStatus(serviceID, service.status, err.message);
+      this.broadcastStatus(serviceID, service.status, message);
       service.process = null;
     }
   }
@@ -252,7 +256,7 @@ export class ServiceManager {
       }
 
       service.process.removeAllListeners("exit");
-      service.process.on("exit", (code, signal) => {
+      service.process.on("exit", () => {
         this.logger.info(`Service ${service.name} confirmed stopped.`);
         this.addLog(serviceID, `${service.name} confirmed stopped.`, "system");
         if (service.status !== "error") service.status = "stopped";

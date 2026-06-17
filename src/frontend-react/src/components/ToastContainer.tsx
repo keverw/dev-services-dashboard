@@ -7,7 +7,7 @@ interface ToastItemProps {
   onRemove: (id: string) => void;
 }
 
-function ToastItem({ toast, index, onRemove }: ToastItemProps) {
+function ToastItem({ toast, index: _index, onRemove }: ToastItemProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
 

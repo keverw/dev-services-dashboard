@@ -1,15 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { spawn } from "child_process";
-import { createServer } from "http";
-import { WebSocketServer } from "ws";
-import { readFile } from "fs/promises";
 import getPort from "get-port";
 
 // Mock dependencies
 mock.module("child_process", () => ({
   spawn: mock(() => {
     const mockProcess = {
-      on: mock((event: string, callback: Function) => {
+      on: mock((event: string, callback: (...args: unknown[]) => void) => {
         if (event === "spawn") {
           // Simulate successful spawn
           setTimeout(() => callback(), 10);
@@ -30,18 +26,12 @@ mock.module("fs/promises", () => ({
 }));
 
 // Import after mocking
-import {
-  startDevServicesDashboard,
-  type DevUIConfig,
-  type UserServiceConfig,
-} from "./index";
+import { startDevServicesDashboard, type DevUIConfig } from "./index";
 
 describe("Dev Services Dashboard", () => {
-  let mockBroadcast: ReturnType<typeof mock>;
   let testConfig: DevUIConfig;
 
   beforeEach(async () => {
-    mockBroadcast = mock();
     // Use dynamic port allocation to avoid conflicts
     const port = await getPort();
     testConfig = {

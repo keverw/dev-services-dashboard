@@ -20,11 +20,12 @@ export class WebSocketHandler {
     // Handle messages
     ws.on("message", (data) => {
       try {
-        const message = JSON.parse(data.toString());
+        const message = JSON.parse(data.toString()) as Record<string, unknown>;
         this.handleMessage(ws, message);
-      } catch (err: any) {
-        this.logger.error("WS message processing error:", err);
-        this.sendError(ws, `Error: ${err.message}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error("WS message processing error:", err as object);
+        this.sendError(ws, `Error: ${message}`);
       }
     });
 
@@ -53,8 +54,14 @@ export class WebSocketHandler {
     ws.send(JSON.stringify(initialState));
   }
 
-  private async handleMessage(ws: WebSocket, data: any) {
-    const { action, serviceID } = data;
+  private async handleMessage(
+    ws: WebSocket,
+    data: Record<string, unknown>,
+  ) {
+    const { action, serviceID } = data as {
+      action: string;
+      serviceID: string;
+    };
     this.logger.info("WS RCV:", data);
 
     if (!this.serviceManager.getService(serviceID)) {
