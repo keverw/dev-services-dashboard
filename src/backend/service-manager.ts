@@ -642,12 +642,22 @@ export class ServiceManager {
         this.broadcastStatus(serviceID, service.status, service.errorDetails);
         service.process = null;
         clearTimeout(timeout);
-        // The leader has exited, but members of its process group may still be
-        // alive (e.g. a child that ignored SIGTERM). Force-kill the group so
-        // stop never resolves while children are left holding ports. No-op if
-        // the group is already empty. This runs before resolve(), so callers
-        // (Stop All / shutdown) await the reap.
-        if (this.useProcessGroups && leaderPid !== undefined) {
+        // Default (group SIGTERM) services: the leader has exited, but members
+        // of its group may still be alive (e.g. a child that ignored SIGTERM),
+        // so force-kill the group to reap them before resolving — otherwise
+        // stop returns with children still holding ports. No-op if the group
+        // is already empty, and it's in the same tick as the exit so there's
+        // no pid-reuse window.
+        //
+        // gracefulShutdown services are deliberately excluded: SIGTERM went to
+        // the main process only so it can coordinate its own children, so we
+        // must NOT kill those children out from under it when it exits. The
+        // force-kill timeout above remains the safety net for a *hung* main.
+        if (
+          this.useProcessGroups &&
+          !service.gracefulShutdown &&
+          leaderPid !== undefined
+        ) {
           try {
             process.kill(-leaderPid, "SIGKILL");
           } catch {

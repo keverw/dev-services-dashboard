@@ -260,17 +260,15 @@ describe("ServiceManager — core behavior", () => {
     ).toBe(true);
   });
 
-  it("gracefulShutdown sends SIGTERM to the main process only, not the group", async () => {
+  it("gracefulShutdown signals only the main process, never the group", async () => {
     if (process.platform === "win32") return;
     const { sm } = makeManager([svc("a", { gracefulShutdown: true })]);
     await startAndRun(sm, "a");
     await sm.stopService("a");
-    // The SIGTERM went straight to the process (not the group) so it can
-    // coordinate its own children. (A group SIGKILL sweep still fires once the
-    // leader exits, as a safety net — that's asserted separately.)
-    expect(
-      killSpy.mock.calls.some(([p, sig]) => Number(p) < 0 && sig === "SIGTERM"),
-    ).toBe(false);
+    // SIGTERM goes straight to the process so it can coordinate its own
+    // children, and (unlike the default path) no group SIGKILL is sent when it
+    // exits — those children are the main's responsibility.
+    expect(killSpy.mock.calls.some(([pid]) => Number(pid) < 0)).toBe(false);
     expect(killLog.some((k) => k.signal === "SIGTERM")).toBe(true);
     expect(sm.getService("a")?.status).toBe("stopped");
   });
