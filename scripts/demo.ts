@@ -52,6 +52,43 @@ const services: UserServiceConfig[] = [
     name: "API Server",
     command: ["bun", "run", "scripts/demo-servers/api-server.ts"],
     env: { NODE_ENV: "development" },
+    // Depends on the datastores being up first (Start All respects this order).
+    dependsOn: ["db", "db2", "redis"],
+    // Custom signals appear as a "Send signal…" dropdown while running.
+    signals: [
+      { label: "Reload config", signal: "SIGHUP" },
+      { label: "Reopen logs", signal: "SIGUSR1" },
+    ],
+    // Pre-start hook: runs before the process spawns. It can log to the
+    // service stream, react to an abort if stopped mid-init, and return a
+    // modified env and/or rewritten web links. Here it simulates a short
+    // config-warmup step.
+    beforeStart: async ({ env, webLinks, log, signal }) => {
+      log("Pre-start: warming up API configuration...");
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 1500);
+        signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+
+      if (signal.aborted) {
+        log("Pre-start aborted before completion.");
+        return;
+      }
+
+      log("Pre-start: configuration ready.");
+      // Return a modified env, and demonstrate rewriting the web links by
+      // appending one resolved at launch time.
+      return {
+        env: { ...env, API_WARMED_UP: "true" },
+        webLinks: [
+          ...webLinks,
+          { label: "Warmed-up Status", url: "http://localhost:3001/warmup" },
+        ],
+      };
+    },
     // Note: These are demo URLs - they won't actually work since the demo servers don't expose these endpoints
     webLinks: [
       { label: "API Docs", url: "http://localhost:3001/docs" },
@@ -64,6 +101,8 @@ const services: UserServiceConfig[] = [
     name: "Authentication Service",
     command: ["bun", "run", "scripts/demo-servers/api-server.ts"],
     env: { NODE_ENV: "development", SERVICE_NAME: "auth" },
+    dependsOn: ["db"],
+    signals: [{ label: "Reload config", signal: "SIGHUP" }],
     webLinks: [
       { label: "Auth Dashboard", url: "http://localhost:3002/dashboard" },
       { label: "User Management", url: "http://localhost:3002/users" },
@@ -74,6 +113,7 @@ const services: UserServiceConfig[] = [
     name: "Notification Service",
     command: ["bun", "run", "scripts/demo-servers/api-server.ts"],
     env: { NODE_ENV: "development", SERVICE_NAME: "notifications" },
+    dependsOn: ["queue"],
     webLinks: [
       { label: "Email Queue", url: "http://localhost:3003/queue" },
       { label: "Templates", url: "http://localhost:3003/templates" },
@@ -84,6 +124,8 @@ const services: UserServiceConfig[] = [
     name: "SSR Server (Main Website)",
     command: ["bun", "run", "scripts/demo-servers/ssr-server.ts"],
     env: { NODE_ENV: "development" },
+    dependsOn: ["api", "auth"],
+    signals: [{ label: "Reload config", signal: "SIGHUP" }],
     // Note: These are demo URLs - they won't actually work since the demo servers don't expose these endpoints
     webLinks: [
       { label: "Website", url: "http://localhost:3000" },
@@ -95,6 +137,7 @@ const services: UserServiceConfig[] = [
     name: "Admin Dashboard",
     command: ["bun", "run", "scripts/demo-servers/ssr-server.ts"],
     env: { NODE_ENV: "development", SERVICE_NAME: "admin" },
+    dependsOn: ["api", "auth"],
     webLinks: [
       { label: "Admin Panel", url: "http://localhost:3004/admin" },
       { label: "Analytics", url: "http://localhost:3004/analytics" },
@@ -105,6 +148,7 @@ const services: UserServiceConfig[] = [
     name: "WebSocket Server",
     command: ["bun", "run", "scripts/demo-servers/api-server.ts"],
     env: { NODE_ENV: "development", SERVICE_NAME: "websocket" },
+    dependsOn: ["api"],
     webLinks: [{ label: "WS Test Client", url: "http://localhost:3005/test" }],
   },
   {
@@ -213,13 +257,20 @@ console.log("  • Infrastructure (Message Queue, Monitoring & Metrics)");
 console.log("  • Tab scrolling with arrow buttons for many services");
 console.log("  • Text truncation for long service names");
 console.log("  • Start/stop/restart individual services or all at once");
+console.log(
+  "  • dependsOn ordering (api waits for db/db2/redis; ssr/admin wait for api/auth)",
+);
+console.log("  • Custom signals dropdown (SIGHUP/SIGUSR1) on api/auth/ssr");
+console.log("  • beforeStart pre-start hook on the API server (warm-up step)");
 console.log("  • Real-time log streaming with auto-scroll");
 console.log("  • Service status indicators and connection monitoring");
 console.log("  • Web link buttons for quick access to related URLs");
 console.log("");
 console.log("💡 Try:");
-console.log("  • Starting and stopping services");
-console.log("  • Using the 'Start All' button");
+console.log("  • Using 'Start All' and watching services come up in order");
+console.log("  • Using the 'Stop All' button (stops in reverse order)");
+console.log("  • Sending a signal to the API server while it's running");
+console.log("  • Stopping the API server during its 'initializing' warm-up");
 console.log("  • Clicking web link buttons (note: demo URLs won't work)");
 console.log("  • Clearing logs for individual services");
 console.log("  • Toggling auto-scroll on/off");

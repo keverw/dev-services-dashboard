@@ -15,11 +15,37 @@ export function useWebSocket({
   onError,
 }: UseWebSocketOptions) {
   const [socket, setSocket] = useState<WebSocket | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
+  const isUnmountedRef = useRef(false);
 
-  const sendAction = (serviceID: string, action: string) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ action, serviceID }));
+  // The socket's event handlers are bound once (on mount), so without this they
+  // would close over the callbacks from the first render forever — meaning
+  // handlers like onClose/onMessage would see stale state (e.g. an empty
+  // service list). Mirror the latest callbacks into a ref each render so the
+  // handlers always invoke the current versions.
+  const callbacksRef = useRef({ onMessage, onOpen, onClose, onError });
+  useEffect(() => {
+    callbacksRef.current = { onMessage, onOpen, onClose, onError };
+  });
+
+  const sendAction = (
+    serviceID: string,
+    action: string,
+    payload?: Record<string, unknown>,
+  ) => {
+    const ws = socketRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action, serviceID, ...payload }));
+    } else {
+      console.error("WebSocket not connected.");
+    }
+  };
+
+  const sendGlobalAction = (action: string) => {
+    const ws = socketRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action }));
     } else {
       console.error("WebSocket not connected.");
     }
@@ -32,14 +58,15 @@ export function useWebSocket({
 
     ws.onopen = () => {
       console.log("WebSocket connected.");
+      socketRef.current = ws;
       setSocket(ws);
-      onOpen();
+      callbacksRef.current.onOpen();
     };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        onMessage(data);
+        callbacksRef.current.onMessage(data);
       } catch (err) {
         console.error("Error parsing WebSocket message:", err);
       }
@@ -54,31 +81,38 @@ export function useWebSocket({
         "WasClean:",
         event.wasClean,
       );
+      socketRef.current = null;
       setSocket(null);
-      onClose();
+      callbacksRef.current.onClose();
 
-      // Reconnect after 3 seconds
-      reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
+      // Reconnect after 3 seconds, unless the component has unmounted.
+      if (!isUnmountedRef.current) {
+        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
+      }
     };
 
     ws.onerror = (error) => {
       console.error("WebSocket error:", error);
-      onError();
+      callbacksRef.current.onError();
     };
   };
 
   useEffect(() => {
+    isUnmountedRef.current = false;
     connectWebSocket();
 
     return () => {
+      isUnmountedRef.current = true;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
-      if (socket) {
-        socket.close();
-      }
+      socketRef.current?.close();
+      socketRef.current = null;
     };
+    // Connect exactly once on mount; reconnection is handled internally by the
+    // onclose handler, and the latest callbacks are read from callbacksRef.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { socket, sendAction };
+  return { socket, sendAction, sendGlobalAction };
 }

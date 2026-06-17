@@ -2,11 +2,18 @@ export interface ServiceConfig {
   id: string;
   name: string;
   webLinks?: WebLink[];
+  signals?: ServiceSignal[];
+  dependsOn?: string[];
 }
 
 export interface WebLink {
   label: string;
   url: string;
+}
+
+export interface ServiceSignal {
+  label: string;
+  signal: string;
 }
 
 export interface LogEntry {
@@ -17,7 +24,14 @@ export interface LogEntry {
 
 export interface ServiceStatus {
   id: string;
-  status: "stopped" | "running" | "starting" | "stopping" | "error" | "crashed";
+  status:
+    | "stopped"
+    | "running"
+    | "initializing"
+    | "starting"
+    | "stopping"
+    | "error"
+    | "crashed";
   errorDetails?: string;
 }
 
@@ -27,6 +41,7 @@ export interface WebSocketMessage {
     | "log"
     | "status_update"
     | "logs_cleared"
+    | "links_update"
     | "error_from_server";
   serviceID?: string;
   services?: Array<{
@@ -41,6 +56,7 @@ export interface WebSocketMessage {
   status?: string;
   errorDetails?: string;
   message?: string;
+  webLinks?: WebLink[];
 }
 
 export interface AutoScrollStates {

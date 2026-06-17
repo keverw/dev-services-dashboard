@@ -44,7 +44,34 @@
 
 ## 0.1.0 (June XXXX, 2026) (UNRELEASED)
 
+### Features
+
+- **Stop All** — a "Stop All" button in the header (alongside "Start All") stops every running service in reverse dependency order (dependents before the services they depend on). Disabled when nothing is running.
+- **Custom signals** — services can declare a `signals` list (`{ label, signal }`). When a service is running, a "Send signal…" dropdown appears in its control bar that sends the chosen POSIX signal (e.g. `SIGHUP` to reload config) to the process. Unknown signal names are ignored.
+- **`dependsOn` startup ordering** — services can declare a `dependsOn: string[]` list so they start in dependency order (dependencies before their dependents). Unknown dependency IDs are ignored with a warning; a self-dependency or a cycle is a configuration error that refuses startup. "Start All" skips only the (transitive) dependents of a service that fails — unrelated services keep starting — and reports how many were skipped; "Stop All" stops in reverse order. Manually starting a single service whose dependencies aren't running shows a non-blocking warning (e.g. "Starting api, but db is stopped") but still starts it — `dependsOn` is an ordering hint, not an enforced constraint.
+- **`beforeStart` hook** — services can declare an async `beforeStart(ctx)` hook that runs before the process spawns. It receives the merged `env`, the current `webLinks`, a `log()` callback that writes to the service's log stream, and an `AbortSignal` that fires if the service is stopped while the hook runs. It may return `{ env?, webLinks? }` to customize the environment passed to the process and/or update the service's web links (which refresh live in the dashboard); throwing puts the service into the `error` state without crashing the dashboard. While the hook runs the service shows a new `initializing` status, and "Start All" waits for it rather than timing out.
+
+### UX / fixes
+
+- The wait before a stuck service is force-killed on stop is now configurable — globally via `stopTimeout` (ms) in the dashboard config, or per service via `stopTimeout` (overrides the global). Default 5000ms.
+- Stopping a service now also terminates the child processes it spawned — e.g. a `bun run` / `vite` / `nodemon` wrapper's underlying dev server — so they no longer linger holding ports and cause `EADDRINUSE` on the next start. (POSIX, including best-effort cleanup of children that detached into their own group; on Windows only the launched process is signaled.)
+- Added a per-service `gracefulShutdown` option: when enabled, the stop signal goes only to the service's main process so it can shut down its own children (handy for testing graceful shutdown), with a forced kill of the whole tree as a safety net. Default off.
+- A service that has crashed can now be started or restarted again from the dashboard — previously the Start/Restart buttons looked enabled but did nothing. Starting it also clears the error.
+- Toast notifications now slide in cleanly instead of briefly appearing in place and then jumping in from the edge — most noticeable when several arrive at once.
+- Toasts now animate out smoothly and neighbors glide into place instead of snapping, including on auto-dismiss and when older toasts are pushed out by newer ones.
+- "Start All" now shows a single live progress toast (`Starting services… (n/total)`) that updates in place and ends in a summary, instead of a toast per service. Failures still surface their own error toast.
+- Fixed services not showing as "Disconnected" when the connection drops, and some notifications showing a service's internal id instead of its name.
+- Light/dark theme switching now fades smoothly instead of snapping (and doesn't animate on the initial page load).
+
+### Tests
+
+- Added `service-manager.test.ts` — unit tests that exercise `ServiceManager` directly (no HTTP/WS stack) covering core lifecycle, custom signals, `dependsOn` ordering, and the `beforeStart` hook. Also covers stdout/stderr log piping, the process `error` event, and recovery from a `crashed` state.
+- Added `logger.test.ts` covering `createConsoleLogger` (enabled/disabled/default) and the `Logger` wrapper.
+- Added WebSocket integration tests for the new `send_signal` (missing-signal validation) and `stop_all` actions.
+- Raised backend coverage from ~89% to ~94% lines; `service-manager.ts` and `logger.ts` are now at 100%.
+
 ### Build / tooling
+
 - Added `typecheck` script (`tsc --noEmit`) for backend TypeScript validation
 - Added `prepublishOnly` script — runs lint, typecheck, audit, and build before every publish
 - Upgraded all devDependencies to latest (ESLint 10, Vite 8, tsup, @typescript-eslint 8, etc.)
@@ -53,4 +80,4 @@
 - Created `eslint.config.mjs` (ESLint v9+ flat config) with TypeScript, React, React Hooks, and jsx-a11y rules
 - Fixed `tsconfig.json` to exclude `src/frontend-react` (which has its own tsconfig/Vite toolchain) so `tsc --noEmit` only checks the published library code
 - Fixed pre-existing lint errors surfaced by the new config (`any` types, unused vars, `ToastContext` forward-reference bug)
-
+- Cleared all remaining React Hooks lint warnings — `bun run lint` is now warning-free: derived `theme` in `ThemeContext` instead of mirroring it into state via an effect, removed a redundant `activeTabId` read from the mount-only load effect, deleted the unused legacy `Toast.tsx` component, and added scoped suppressions (with reasons) for the intentional mount-once WebSocket effect and two `Date.now()` calls in non-render event handlers

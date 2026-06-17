@@ -6,10 +6,7 @@ import frontendVFS from "./frontend-vfs";
 
 export class HttpHandler {
   private serviceManager: ServiceManager;
-  private vfsMiddleware: (
-    req: IncomingMessage,
-    res: ServerResponse,
-  ) => boolean;
+  private vfsMiddleware: (req: IncomingMessage, res: ServerResponse) => boolean;
   private logger: Logger;
   private dashboardName: string;
 
@@ -55,6 +52,8 @@ export class HttpHandler {
         id: s.id,
         name: s.name,
         webLinks: s.webLinks || [],
+        signals: s.signals || [],
+        dependsOn: s.dependsOn || [],
       }));
 
     const response = JSON.stringify({

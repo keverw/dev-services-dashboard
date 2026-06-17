@@ -14,6 +14,7 @@ interface ServiceTabProps {
   onRestart: () => void;
   onClearLogs: () => void;
   onToggleAutoScroll: () => void;
+  onSendSignal: (signal: string) => void;
 }
 
 function ServiceTab({
@@ -28,6 +29,7 @@ function ServiceTab({
   onRestart,
   onClearLogs,
   onToggleAutoScroll,
+  onSendSignal,
 }: ServiceTabProps) {
   const logsRef = useRef<HTMLPreElement>(null);
   const { addToast } = useToast();
@@ -52,6 +54,7 @@ function ServiceTab({
 
   const isStartDisabled =
     currentStatus === "running" ||
+    currentStatus === "initializing" ||
     currentStatus === "starting" ||
     currentStatus === "stopping";
   const isStopDisabled =
@@ -61,7 +64,10 @@ function ServiceTab({
     currentStatus === "starting" ||
     currentStatus === "stopping";
   const isRestartDisabled =
-    currentStatus === "starting" || currentStatus === "stopping";
+    currentStatus === "initializing" ||
+    currentStatus === "starting" ||
+    currentStatus === "stopping";
+  const isSignalDisabled = currentStatus !== "running";
 
   const createWebLinkButtons = () => {
     if (!service.webLinks || service.webLinks.length === 0) {
@@ -148,6 +154,31 @@ function ServiceTab({
           >
             Restart
           </button>
+          {service.signals && service.signals.length > 0 && (
+            <select
+              id={`${service.id}-send-signal`}
+              className="send-signal-select"
+              title={`Send a signal to ${service.name}`}
+              value=""
+              disabled={isSignalDisabled}
+              onChange={(e) => {
+                const signal = e.target.value;
+                if (signal) {
+                  onSendSignal(signal);
+                  e.target.value = "";
+                }
+              }}
+            >
+              <option value="" disabled>
+                Send signal…
+              </option>
+              {service.signals.map((s) => (
+                <option key={s.signal} value={s.signal}>
+                  {s.label} ({s.signal})
+                </option>
+              ))}
+            </select>
+          )}
           <button
             id={`${service.id}-clear-logs`}
             className="clear-logs-button"

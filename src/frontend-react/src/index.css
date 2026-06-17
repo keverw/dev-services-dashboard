@@ -9,6 +9,20 @@
   @apply box-border;
 }
 
+/* Smooth color fade when switching light/dark themes. Gated behind
+   .theme-transitions (added by ThemeProvider after the first paint) so the
+   initial theme on page load snaps in instead of animating. Only color-ish
+   properties transition, so transform/opacity animations (toasts, pulses)
+   are untouched. */
+html.theme-transitions,
+html.theme-transitions *,
+html.theme-transitions *::before,
+html.theme-transitions *::after {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 0.25s;
+  transition-timing-function: ease;
+}
+
 body {
   @apply font-sans m-0 p-0 bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 leading-relaxed flex flex-col min-h-screen overflow-x-hidden w-full;
 }
@@ -80,6 +94,19 @@ header {
   @apply cursor-not-allowed bg-gray-400;
 }
 
+.stop-all-header-btn {
+  @apply cursor-pointer whitespace-nowrap rounded border-none bg-error-500 px-3 py-1.5 text-sm font-medium text-white transition-colors;
+  position: relative;
+}
+
+.stop-all-header-btn:hover {
+  @apply bg-error-600;
+}
+
+.stop-all-header-btn:disabled {
+  @apply cursor-not-allowed bg-gray-400;
+}
+
 /* Toast Notification System */
 .toast-container {
   @apply fixed z-[1000] flex flex-col gap-3;
@@ -102,6 +129,9 @@ header {
 
 .toast-enter {
   animation: toastSlideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Apply the keyframe's off-screen "from" state immediately on mount so the
+     toast never flashes at rest before sliding in. */
+  animation-fill-mode: backwards;
 }
 
 .toast-exit {
@@ -426,6 +456,7 @@ header {
 .status-running {
   @apply bg-success-500;
 }
+.status-initializing,
 .status-starting {
   @apply bg-warning-500 animate-pulse;
 }
@@ -564,6 +595,12 @@ header {
 }
 .controls button.clear-logs-button:hover {
   @apply bg-gray-600;
+}
+.controls .send-signal-select {
+  @apply bg-primary-500 text-white border-none px-3 py-3 m-0 rounded cursor-pointer text-sm transition-colors h-[38px];
+}
+.controls .send-signal-select:disabled {
+  @apply bg-gray-400 cursor-not-allowed;
 }
 
 .connection-status {

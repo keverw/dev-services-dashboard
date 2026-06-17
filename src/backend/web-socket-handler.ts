@@ -48,21 +48,26 @@ export class WebSocketHandler {
         logs: s.logs,
         errorDetails: s.errorDetails,
         webLinks: s.webLinks || [],
+        signals: s.signals || [],
+        dependsOn: s.dependsOn || [],
       })),
     };
 
     ws.send(JSON.stringify(initialState));
   }
 
-  private async handleMessage(
-    ws: WebSocket,
-    data: Record<string, unknown>,
-  ) {
+  private async handleMessage(ws: WebSocket, data: Record<string, unknown>) {
     const { action, serviceID } = data as {
       action: string;
       serviceID: string;
     };
     this.logger.info("WS RCV:", data);
+
+    // Global actions that don't target a specific service.
+    if (action === "stop_all") {
+      await this.serviceManager.stopAllServices();
+      return;
+    }
 
     if (!this.serviceManager.getService(serviceID)) {
       this.logger.error(`Invalid serviceID: ${serviceID}`);
@@ -83,6 +88,18 @@ export class WebSocketHandler {
       case "clear_logs":
         this.serviceManager.clearServiceLogs(serviceID);
         break;
+      case "send_signal": {
+        const { signal } = data as { signal?: string };
+
+        if (typeof signal !== "string" || signal.length === 0) {
+          this.logger.warn(`send_signal missing signal for ${serviceID}`);
+          this.sendError(ws, "send_signal requires a signal");
+          break;
+        }
+
+        this.serviceManager.sendSignal(serviceID, signal);
+        break;
+      }
       default:
         this.logger.warn(`Unknown action: ${action}`);
         this.sendError(ws, `Unknown action: ${action}`);

@@ -213,6 +213,65 @@ describe("Dev Services Dashboard", () => {
       ws.close();
       await server.stop();
     });
+
+    it("should reject send_signal without a signal", async () => {
+      const server = await startDevServicesDashboard(testConfig);
+
+      const ws = new WebSocket(`ws://localhost:${server.port}`);
+      await new Promise((resolve) => {
+        ws.onopen = resolve;
+      });
+
+      ws.send(
+        JSON.stringify({ action: "send_signal", serviceID: "test-service" }),
+      );
+
+      const errorResponse = await new Promise((resolve, reject) => {
+        let messageCount = 0;
+        ws.onmessage = (event) => {
+          messageCount++;
+          const data = JSON.parse(event.data);
+          if (data.type === "error_from_server" && messageCount > 1) {
+            resolve(data);
+          }
+        };
+        setTimeout(reject, 1000);
+      });
+
+      expect(errorResponse).toMatchObject({
+        type: "error_from_server",
+        message: expect.stringContaining("send_signal requires a signal"),
+      });
+
+      ws.close();
+      await server.stop();
+    });
+
+    it("should handle stop_all without error when nothing is running", async () => {
+      const server = await startDevServicesDashboard(testConfig);
+
+      const ws = new WebSocket(`ws://localhost:${server.port}`);
+      await new Promise((resolve) => {
+        ws.onopen = resolve;
+      });
+
+      ws.send(JSON.stringify({ action: "stop_all" }));
+
+      // No services are running, so stop_all should complete silently — assert
+      // we don't get an error_from_server back.
+      const sawError = await new Promise((resolve) => {
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "error_from_server") resolve(true);
+        };
+        setTimeout(() => resolve(false), 300);
+      });
+
+      expect(sawError).toBe(false);
+
+      ws.close();
+      await server.stop();
+    });
   });
 
   describe("Configuration", () => {

@@ -3,14 +3,18 @@ import { useState, useEffect } from "react";
 
 interface HeaderProps {
   onStartAll?: () => void;
+  onStopAll?: () => void;
   startAllInProgress?: boolean;
+  stopAllDisabled?: boolean;
   hasServices?: boolean;
   dashboardName?: string;
 }
 
 function Header({
   onStartAll,
+  onStopAll,
   startAllInProgress,
+  stopAllDisabled,
   hasServices,
   dashboardName,
 }: HeaderProps) {
@@ -77,16 +81,28 @@ function Header({
     </div>
   );
 
-  const startButton = hasServices && onStartAll && (
+  const startButton = hasServices && (onStartAll || onStopAll) && (
     <div className="header-controls">
-      <button
-        className="start-all-header-btn"
-        onClick={onStartAll}
-        disabled={startAllInProgress}
-        title="Start all services"
-      >
-        Start All
-      </button>
+      {onStartAll && (
+        <button
+          className="start-all-header-btn"
+          onClick={onStartAll}
+          disabled={startAllInProgress}
+          title="Start all services"
+        >
+          Start All
+        </button>
+      )}
+      {onStopAll && (
+        <button
+          className="stop-all-header-btn"
+          onClick={onStopAll}
+          disabled={stopAllDisabled}
+          title="Stop all services"
+        >
+          Stop All
+        </button>
+      )}
     </div>
   );
 

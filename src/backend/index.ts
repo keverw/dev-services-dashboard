@@ -37,6 +37,7 @@ export function startDevServicesDashboard(
         MAX_LOG_LINES,
         broadcast,
         config.defaultCwd,
+        config.stopTimeout,
       );
 
       // Initialize HTTP handler
