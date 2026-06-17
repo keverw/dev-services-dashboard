@@ -87,38 +87,38 @@ function Header({
 
   const startButton = hasServices &&
     (onStartAll || onStopAll || onToggleOverview) && (
-    <div className="header-controls">
-      {onToggleOverview && (
-        <button
-          className={`overview-header-btn ${overviewActive ? "active" : ""}`}
-          onClick={onToggleOverview}
-          title="Overview of all services"
-        >
-          Overview
-        </button>
-      )}
-      {onStartAll && (
-        <button
-          className="start-all-header-btn"
-          onClick={onStartAll}
-          disabled={startAllInProgress}
-          title="Start all services"
-        >
-          Start All
-        </button>
-      )}
-      {onStopAll && (
-        <button
-          className="stop-all-header-btn"
-          onClick={onStopAll}
-          disabled={stopAllDisabled}
-          title="Stop all services"
-        >
-          Stop All
-        </button>
-      )}
-    </div>
-  );
+      <div className="header-controls">
+        {onToggleOverview && (
+          <button
+            className={`overview-header-btn ${overviewActive ? "active" : ""}`}
+            onClick={onToggleOverview}
+            title="Overview of all services"
+          >
+            Overview
+          </button>
+        )}
+        {onStartAll && (
+          <button
+            className="start-all-header-btn"
+            onClick={onStartAll}
+            disabled={startAllInProgress}
+            title="Start all services"
+          >
+            Start All
+          </button>
+        )}
+        {onStopAll && (
+          <button
+            className="stop-all-header-btn"
+            onClick={onStopAll}
+            disabled={stopAllDisabled}
+            title="Stop all services"
+          >
+            Stop All
+          </button>
+        )}
+      </div>
+    );
 
   const title = dashboardName || "Dev Services Dashboard";
 

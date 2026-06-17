@@ -174,8 +174,10 @@ let realSetTimeout: typeof setTimeout;
 let killSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
-  // Collapse long timers (the 5s SIGKILL fallback, the 500ms restart gap) so
-  // tests stay fast and deterministic.
+  // Collapse long timers (the 5s SIGKILL fallback, the 500ms restart gap, the
+  // Start All wait windows) so tests stay fast — but to a value comfortably
+  // above the mock's 0ms "spawn"/exit emits, so a service still reaches
+  // "running" before its Start All start-timeout would fire.
   realSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = ((
     fn: (...a: unknown[]) => void,
@@ -184,7 +186,7 @@ beforeEach(() => {
   ) =>
     realSetTimeout(
       fn,
-      typeof ms === "number" && ms >= 200 ? 1 : ms,
+      typeof ms === "number" && ms >= 200 ? 20 : ms,
       ...rest,
     )) as unknown as typeof setTimeout;
 
@@ -474,8 +476,8 @@ describe("ServiceManager — dependsOn ordering", () => {
     );
   });
 
-  it("stopAllServices stops in reverse start order", async () => {
-    const { sm } = makeManager([
+  it("stopAllServices stops in reverse start order and broadcasts progress", async () => {
+    const { sm, broadcasts } = makeManager([
       svc("c", { dependsOn: ["b"] }),
       svc("b", { dependsOn: ["a"] }),
       svc("a"),
@@ -485,8 +487,70 @@ describe("ServiceManager — dependsOn ordering", () => {
     await startAndRun(sm, "b");
     await startAndRun(sm, "c");
     killLog.length = 0;
+    broadcasts.length = 0;
     await sm.stopAllServices();
     expect(killLog.map((k) => k.cmd)).toEqual(["c", "b", "a"]);
+    expect(broadcasts.find((b) => b.type === "stop_all_begin")).toMatchObject({
+      total: 3,
+    });
+    expect(broadcasts.find((b) => b.type === "stop_all_done")).toMatchObject({
+      stopped: 3,
+    });
+  });
+});
+
+// --- startAllServices orchestration -----------------------------------------
+
+describe("ServiceManager — startAllServices", () => {
+  const findDone = (broadcasts: Array<Record<string, unknown>>) =>
+    broadcasts.find((b) => b.type === "start_all_done");
+
+  it("starts every service and reports success", async () => {
+    const { sm, broadcasts } = makeManager([
+      svc("a"),
+      svc("b", { dependsOn: ["a"] }),
+    ]);
+    await sm.startAllServices();
+    expect(broadcasts.find((b) => b.type === "start_all_begin")).toMatchObject({
+      total: 2,
+    });
+    expect(findDone(broadcasts)).toMatchObject({
+      started: 2,
+      failed: 0,
+      skipped: 0,
+    });
+    expect(sm.getService("a")?.status).toBe("running");
+    expect(sm.getService("b")?.status).toBe("running");
+  });
+
+  it("skips transitive dependents of a failed service", async () => {
+    const { sm, broadcasts } = makeManager([
+      svc("a", {
+        beforeStart: async () => {
+          throw new Error("boom");
+        },
+      }),
+      svc("b", { dependsOn: ["a"] }),
+      svc("c"),
+    ]);
+    await sm.startAllServices();
+    // a failed -> b (depends on a) skipped; c is unrelated and starts.
+    expect(findDone(broadcasts)).toMatchObject({
+      started: 1,
+      failed: 1,
+      skipped: 1,
+    });
+    expect(sm.getService("a")?.status).toBe("error");
+    expect(sm.getService("b")?.status).toBe("stopped");
+    expect(sm.getService("c")?.status).toBe("running");
+  });
+
+  it("ignores a concurrent startAllServices call", async () => {
+    const { sm } = makeManager([svc("a")]);
+    const first = sm.startAllServices();
+    const second = sm.startAllServices(); // should be a no-op while first runs
+    await Promise.all([first, second]);
+    expect(sm.getService("a")?.status).toBe("running");
   });
 });
 

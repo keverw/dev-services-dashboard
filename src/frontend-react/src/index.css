@@ -129,7 +129,9 @@ header {
 }
 
 .toast-item {
-  @apply flex items-center gap-3 rounded-lg shadow-lg px-4 py-3 min-w-[320px] max-w-[420px];
+  /* Fixed width so a toast doesn't resize as its text length changes (e.g. a
+     live progress toast counting up, then morphing into a summary). */
+  @apply flex items-center gap-3 rounded-lg shadow-lg px-4 py-3 w-[360px];
   background: white;
   border-left: 4px solid;
   font-size: 14px;

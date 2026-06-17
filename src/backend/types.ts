@@ -121,6 +121,17 @@ export interface DevUIConfig {
    * stopping a service. Per-service `stopTimeout` overrides this. Default: 5000.
    */
   stopTimeout?: number;
+  /**
+   * How long (ms) "Start All" waits for a service to report `running` after it
+   * begins spawning before treating it as timed out. Default: 10000.
+   */
+  startTimeout?: number;
+  /**
+   * How long (ms) "Start All" waits during a service's `beforeStart`
+   * (`initializing`) phase before giving up on it and moving on. The hook keeps
+   * running; Start All just stops blocking on it. Default: 60000.
+   */
+  beforeStartTimeout?: number;
   services: UserServiceConfig[];
   logger?: DevServicesDashboardLoggerFunction;
 }

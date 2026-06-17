@@ -42,8 +42,22 @@ export interface WebSocketMessage {
     | "status_update"
     | "logs_cleared"
     | "links_update"
+    | "start_all_begin"
+    | "start_all_progress"
+    | "start_all_done"
+    | "stop_all_begin"
+    | "stop_all_progress"
+    | "stop_all_done"
     | "error_from_server";
   serviceID?: string;
+  serviceName?: string;
+  result?: "starting" | "started" | "failed" | "skipped" | "stopped";
+  dependencyName?: string;
+  total?: number;
+  started?: number;
+  failed?: number;
+  skipped?: number;
+  stopped?: number;
   services?: Array<{
     id: string;
     status: string;

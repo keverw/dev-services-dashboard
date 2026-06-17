@@ -64,6 +64,11 @@ export class WebSocketHandler {
     this.logger.info("WS RCV:", data);
 
     // Global actions that don't target a specific service.
+    if (action === "start_all") {
+      await this.serviceManager.startAllServices();
+      return;
+    }
+
     if (action === "stop_all") {
       await this.serviceManager.stopAllServices();
       return;

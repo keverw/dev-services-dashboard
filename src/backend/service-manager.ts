@@ -57,6 +57,14 @@ export class ServiceManager {
   private readonly useProcessGroups = process.platform !== "win32";
   // Default time (ms) to wait after SIGTERM before escalating to SIGKILL.
   private readonly defaultStopTimeout: number;
+  // "Start All" wait windows: `startTimeout` for reaching `running` after
+  // spawning, `beforeStartTimeout` for the `initializing`/`beforeStart` phase.
+  private readonly startTimeout: number;
+  private readonly beforeStartTimeout: number;
+  // One-shot listeners that "Start All" registers per service to be notified
+  // (via broadcastStatus) when the service it's waiting on changes status.
+  private startWaiters = new Map<string, (status: Service["status"]) => void>();
+  private startAllInProgress = false;
 
   constructor(
     logger: Logger,
@@ -64,12 +72,18 @@ export class ServiceManager {
     maxLogLines: number,
     broadcastFn: (message: object) => void,
     defaultCwd: string | undefined,
-    defaultStopTimeout: number = 5000,
+    options: {
+      stopTimeout?: number;
+      startTimeout?: number;
+      beforeStartTimeout?: number;
+    } = {},
   ) {
     this.maxLogLines = maxLogLines;
     this.broadcastFn = broadcastFn;
     this.logger = logger;
-    this.defaultStopTimeout = defaultStopTimeout;
+    this.defaultStopTimeout = options.stopTimeout ?? 5000;
+    this.startTimeout = options.startTimeout ?? 10000;
+    this.beforeStartTimeout = options.beforeStartTimeout ?? 60000;
 
     // Convert user service configs to full service objects
     this.services = userServices.map((userService) => ({
@@ -206,6 +220,9 @@ export class ServiceManager {
       status,
       errorDetails,
     });
+
+    // Notify a "Start All" waiter watching this service for status changes.
+    this.startWaiters.get(serviceID)?.(status);
   }
 
   async startService(serviceID: string) {
@@ -434,6 +451,15 @@ export class ServiceManager {
    * Sends an arbitrary POSIX signal to a running service process. The signal
    * must be a known signal name (validated against `os.constants.signals`).
    * No-op if the service is not currently running.
+   *
+   * Unlike stop (which signals the whole process group), this targets ONLY the
+   * launched command's main process — by design. Custom signals like `SIGHUP`
+   * (reload config) are meant for the process you configured, not blasted at
+   * every child it forked. Note the consequence: if your `command` is a wrapper
+   * that does not forward signals (e.g. `bun run …`, `vite`, `nodemon`), the
+   * signal reaches the wrapper, not the underlying dev server it spawned. If you
+   * need the inner process to receive it, run that process directly (or have the
+   * wrapper forward signals).
    */
   sendSignal(serviceID: string, signal: string): void {
     const service = this.getService(serviceID);
@@ -513,7 +539,7 @@ export class ServiceManager {
    * reached by the group signal. POSIX-only and called while the parent is
    * still alive, so the pids are current (no stale-pid reuse risk). Children
    * that fully daemonized (double-fork, reparented to init) are not tracked.
-   * 
+   *
    * Runs `ps` asynchronously so it never blocks the event loop; resolves once
    * the walk + kills are done (or is skipped on Windows / if `ps` is missing).
    *
@@ -568,7 +594,7 @@ export class ServiceManager {
 
       child.on("close", (code) => {
         clearTimeout(guard);
-        
+
         if (code === 0) {
           for (const childPid of collectDescendants(
             pid,
@@ -741,17 +767,180 @@ export class ServiceManager {
           (s.process && (s.status === "running" || s.status === "starting")),
       );
 
-    for (const service of toStop) {
-      try {
-        await this.stopService(service.id);
-      } catch (err) {
-        this.logger.error(
-          `Error stopping ${service.name} during shutdown:`,
-          err as object,
-        );
+    const total = toStop.length;
+    let stopped = 0;
+    this.broadcastFn({ type: "stop_all_begin", total });
+
+    try {
+      for (const service of toStop) {
+        try {
+          await this.stopService(service.id);
+        } catch (err) {
+          this.logger.error(
+            `Error stopping ${service.name} during shutdown:`,
+            err as object,
+          );
+        }
+        stopped++;
+        this.broadcastFn({
+          type: "stop_all_progress",
+          serviceID: service.id,
+          serviceName: service.name,
+          result: "stopped",
+          stopped,
+          total,
+        });
+      }
+    } finally {
+      this.broadcastFn({ type: "stop_all_done", stopped });
+      this.logger.info("All services stopped.");
+    }
+  }
+
+  /**
+   * All services that depend (directly or transitively) on the given service.
+   */
+  private getTransitiveDependents(serviceID: string): Set<string> {
+    const result = new Set<string>();
+    const queue = [serviceID];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const svc of this.services) {
+        if (svc.dependsOn?.includes(current) && !result.has(svc.id)) {
+          result.add(svc.id);
+          queue.push(svc.id);
+        }
       }
     }
+    return result;
+  }
 
-    this.logger.info("All services stopped.");
+  /**
+   * Starts a service and resolves once it reaches a terminal start state:
+   * `true` on `running`, `false` on error/crash/stop or timeout. The wait is
+   * driven by status broadcasts (broadcastStatus → startWaiters), and uses two
+   * windows: the longer `beforeStartTimeout` while `initializing`, the shorter
+   * `startTimeout` while `starting`.
+   */
+  private startAndWait(serviceID: string): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        this.startWaiters.delete(serviceID);
+        resolve(ok);
+      };
+
+      const arm = (ms: number) => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => finish(false), ms);
+      };
+
+      this.startWaiters.set(serviceID, (status) => {
+        if (status === "running") finish(true);
+        else if (
+          status === "error" ||
+          status === "crashed" ||
+          status === "stopped"
+        )
+          finish(false);
+        else if (status === "initializing") arm(this.beforeStartTimeout);
+        else if (status === "starting") arm(this.startTimeout);
+      });
+
+      arm(this.startTimeout); // until we hear "initializing"/"starting"
+      void this.startService(serviceID);
+    });
+  }
+
+  /**
+   * Starts all services in dependency order, waiting for each to come up before
+   * starting the next. If one fails (or times out), its transitive dependents
+   * are skipped while unrelated services keep starting. Progress is broadcast
+   * via `start_all_begin` / `start_all_progress` / `start_all_done` so clients
+   * can render it without orchestrating anything themselves.
+   */
+  async startAllServices(): Promise<void> {
+    if (this.startAllInProgress) return;
+    this.startAllInProgress = true;
+
+    const total = this.services.length;
+    const skipped = new Set<string>();
+    const skippedBy = new Map<string, string>(); // serviceID -> failed dep name
+    let started = 0;
+    let failed = 0;
+
+    const progress = (
+      service: Service,
+      result: "starting" | "started" | "failed" | "skipped",
+      extra: Record<string, unknown> = {},
+    ) => {
+      this.broadcastFn({
+        type: "start_all_progress",
+        serviceID: service.id,
+        serviceName: service.name,
+        result,
+        started,
+        total,
+        ...extra,
+      });
+    };
+
+    this.broadcastFn({ type: "start_all_begin", total });
+
+    try {
+      for (const service of this.services) {
+        if (skipped.has(service.id)) {
+          const dep = skippedBy.get(service.id) ?? "a dependency";
+          progress(service, "skipped", { dependencyName: dep });
+          this.addLog(
+            service.id,
+            `Skipping ${service.name} — dependency '${dep}' failed.`,
+            "system",
+          );
+          continue;
+        }
+
+        // Already running or on its way up — count it and move on.
+        if (
+          service.status === "running" ||
+          service.status === "initializing" ||
+          service.status === "starting"
+        ) {
+          started++;
+          progress(service, "started");
+          continue;
+        }
+
+        progress(service, "starting");
+
+        const ok = await this.startAndWait(service.id);
+        if (ok) {
+          started++;
+          progress(service, "started");
+        } else {
+          failed++;
+          for (const depId of this.getTransitiveDependents(service.id)) {
+            if (!skipped.has(depId)) {
+              skipped.add(depId);
+              skippedBy.set(depId, service.name);
+            }
+          }
+          progress(service, "failed", { errorDetails: service.errorDetails });
+        }
+      }
+    } finally {
+      this.startAllInProgress = false;
+      this.broadcastFn({
+        type: "start_all_done",
+        started,
+        failed,
+        skipped: skipped.size,
+      });
+    }
   }
 }

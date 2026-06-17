@@ -62,9 +62,17 @@ function ToastContainer() {
     return null;
   }
 
+  // Pin sticky toasts (duration 0, e.g. the Start All progress toast) to the
+  // top so transient per-service toasts stream in below them rather than
+  // shoving them down.
+  const ordered = [
+    ...toasts.filter((t) => t.duration === 0),
+    ...toasts.filter((t) => t.duration !== 0),
+  ];
+
   return (
     <div className="toast-container">
-      {toasts.map((toast) => (
+      {ordered.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onRemove={removeToast} />
       ))}
     </div>

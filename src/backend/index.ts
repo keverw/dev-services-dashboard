@@ -37,7 +37,11 @@ export function startDevServicesDashboard(
         MAX_LOG_LINES,
         broadcast,
         config.defaultCwd,
-        config.stopTimeout,
+        {
+          stopTimeout: config.stopTimeout,
+          startTimeout: config.startTimeout,
+          beforeStartTimeout: config.beforeStartTimeout,
+        },
       );
 
       // Initialize HTTP handler

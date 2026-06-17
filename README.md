@@ -148,34 +148,36 @@ Perfect for local development where you need to run multiple interdependent serv
 
 The `startDevServicesDashboard` function accepts a configuration object with the following properties:
 
-| Option          | Type                               | Default                  | Description                                                                                                 |
-| --------------- | ---------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `port`          | number                             | 4000                     | The port to run the Dev Services Dashboard server on                                                        |
-| `hostname`      | string                             | 'localhost'              | The hostname to bind the server to                                                                          |
-| `maxLogLines`   | number                             | 200                      | Maximum number of log lines to keep in memory per service                                                   |
-| `defaultCwd`    | string                             | process.cwd()            | Default working directory for services                                                                      |
-| `dashboardName` | string                             | 'Dev Services Dashboard' | Custom name for the dashboard displayed in the UI and page title                                            |
-| `stopTimeout`   | number                             | 5000                     | Default ms to wait after SIGTERM before escalating to SIGKILL on stop (per-service `stopTimeout` overrides) |
-| `services`      | UserServiceConfig[]                | required                 | Array of service configurations                                                                             |
-| `logger`        | DevServicesDashboardLoggerFunction | none (no logging)        | Custom logger function for Dev Services Dashboard internal logs                                             |
+| Option               | Type                               | Default                  | Description                                                                                                       |
+| -------------------- | ---------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `port`               | number                             | 4000                     | The port to run the Dev Services Dashboard server on                                                              |
+| `hostname`           | string                             | 'localhost'              | The hostname to bind the server to                                                                                |
+| `maxLogLines`        | number                             | 200                      | Maximum number of log lines to keep in memory per service                                                         |
+| `defaultCwd`         | string                             | process.cwd()            | Default working directory for services                                                                            |
+| `dashboardName`      | string                             | 'Dev Services Dashboard' | Custom name for the dashboard displayed in the UI and page title                                                  |
+| `stopTimeout`        | number                             | 5000                     | Default ms to wait after SIGTERM before escalating to SIGKILL on stop (per-service `stopTimeout` overrides)       |
+| `startTimeout`       | number                             | 10000                    | Ms "Start All" waits for a service to report `running` after it begins spawning before treating it as timed out   |
+| `beforeStartTimeout` | number                             | 60000                    | Ms "Start All" waits during a service's `beforeStart` (`initializing`) phase before giving up on it and moving on |
+| `services`           | UserServiceConfig[]                | required                 | Array of service configurations                                                                                   |
+| `logger`             | DevServicesDashboardLoggerFunction | none (no logging)        | Custom logger function for Dev Services Dashboard internal logs                                                   |
 
 ### Service Configuration
 
 Each service is defined with the following properties:
 
-| Property           | Type                                                                 | Required | Description                                                                                                                                                                                                                 |
-| ------------------ | -------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`               | string                                                               | Yes      | Unique identifier for the service                                                                                                                                                                                           |
-| `name`             | string                                                               | Yes      | Display name for the service                                                                                                                                                                                                |
-| `command`          | string[]                                                             | Yes      | Command to run (first element is the executable, rest are arguments)                                                                                                                                                        |
-| `cwd`              | string                                                               | No       | Working directory for the command (defaults to defaultCwd)                                                                                                                                                                  |
-| `env`              | Record<string, string>                                               | No       | Environment variables to set for the process                                                                                                                                                                                |
-| `webLinks`         | WebLink[]                                                            | No       | Array of web links to display as buttons in the service UI                                                                                                                                                                  |
-| `signals`          | ServiceSignal[]                                                      | No       | Custom signals you can send to the running process from the UI ([Custom Signals](#custom-signals))                                                                                                                          |
-| `dependsOn`        | string[]                                                             | No       | IDs of services this one depends on; affects Start All / Stop All ordering ([Startup Ordering](#startup-ordering-with-dependson))                                                                                           |
-| `beforeStart`      | (ctx: BeforeStartContext) => Promise<BeforeStartResult \| void>      | No       | Async hook run before the process spawns; may return `{ env?, webLinks? }` ([Pre-start Hook](#pre-start-hook-beforestart))                                                                                                   |
-| `gracefulShutdown` | boolean                                                              | No       | Send the stop `SIGTERM` to only the main process (so it can shut down its own children) instead of the whole group. Forced `SIGKILL` still targets the group. Default `false` ([Process termination](#process-termination)) |
-| `stopTimeout`      | number                                                               | No       | Ms to wait after SIGTERM before escalating to SIGKILL for this service (overrides the global `stopTimeout`). Default `5000`                                                                                                 |
+| Property           | Type                                                            | Required | Description                                                                                                                                                                                                                 |
+| ------------------ | --------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`               | string                                                          | Yes      | Unique identifier for the service                                                                                                                                                                                           |
+| `name`             | string                                                          | Yes      | Display name for the service                                                                                                                                                                                                |
+| `command`          | string[]                                                        | Yes      | Command to run (first element is the executable, rest are arguments)                                                                                                                                                        |
+| `cwd`              | string                                                          | No       | Working directory for the command (defaults to defaultCwd)                                                                                                                                                                  |
+| `env`              | Record<string, string>                                          | No       | Environment variables to set for the process                                                                                                                                                                                |
+| `webLinks`         | WebLink[]                                                       | No       | Array of web links to display as buttons in the service UI                                                                                                                                                                  |
+| `signals`          | ServiceSignal[]                                                 | No       | Custom signals you can send to the running process from the UI ([Custom Signals](#custom-signals))                                                                                                                          |
+| `dependsOn`        | string[]                                                        | No       | IDs of services this one depends on; affects Start All / Stop All ordering ([Startup Ordering](#startup-ordering-with-dependson))                                                                                           |
+| `beforeStart`      | (ctx: BeforeStartContext) => Promise<BeforeStartResult \| void> | No       | Async hook run before the process spawns; may return `{ env?, webLinks? }` ([Pre-start Hook](#pre-start-hook-beforestart))                                                                                                  |
+| `gracefulShutdown` | boolean                                                         | No       | Send the stop `SIGTERM` to only the main process (so it can shut down its own children) instead of the whole group. Forced `SIGKILL` still targets the group. Default `false` ([Process termination](#process-termination)) |
+| `stopTimeout`      | number                                                          | No       | Ms to wait after SIGTERM before escalating to SIGKILL for this service (overrides the global `stopTimeout`). Default `5000`                                                                                                 |
 
 #### Web Links
 
@@ -201,6 +203,8 @@ Each signal is defined with:
 
 Signals are validated on the backend against `os.constants.signals`; an unknown signal name is ignored (and logged) rather than sent.
 
+> **Note:** unlike stop (which signals the whole process group), a custom signal is sent only to the **launched command's main process** — by design, so e.g. a `SIGHUP` "reload config" reaches the process you configured rather than every child it forked. The consequence: if your `command` is a wrapper that doesn't forward signals (`bun run …`, `vite`, `nodemon`, a shell script), the signal hits the wrapper, not the underlying dev server. To signal the inner process, run it directly or have the wrapper forward signals.
+
 ```typescript
 {
   id: "api",
@@ -217,7 +221,7 @@ Signals are validated on the backend against `os.constants.signals`; an unknown 
 
 Services can declare dependencies with `dependsOn` (an array of service `id`s). The dashboard topologically sorts services once at startup so dependencies start before the services that rely on them.
 
-- **Start All** starts services in dependency order. Because it waits for each service to be `running` before moving on, a dependent naturally starts only after its dependency is up. If a service fails, only its (transitive) dependents are skipped — unrelated services keep starting, and a summary reports how many were skipped.
+- **Start All** starts services in dependency order. Because it waits for each service to be `running` before moving on, a dependent naturally starts only after its dependency is up. If a service fails, only the services that depend on it (directly or indirectly) are skipped — unrelated services keep starting, and a summary toast reports how many were skipped.
 - **Stop All** stops services sequentially in **reverse** order, so dependents shut down before the dependencies they rely on.
 - Starting a **single** service manually whose dependencies aren't running shows a non-blocking warning but still starts it — `dependsOn` is an orchestration hint, not enforced runtime wiring.
 - An unknown dependency `id` is ignored with a warning. A **self-dependency** or a dependency **cycle** is a fatal configuration error — the dashboard refuses to start (the error message includes the cycle path).
