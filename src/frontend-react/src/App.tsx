@@ -8,6 +8,7 @@ import {
 import Header from "./components/Header";
 import TabNavigation from "./components/TabNavigation";
 import ServiceTab from "./components/ServiceTab";
+import ServiceOverview from "./components/ServiceOverview";
 import ToastContainer from "./components/ToastContainer";
 import { ToastProvider, useToast } from "./contexts/ToastContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -25,6 +26,7 @@ function AppContent() {
     "Dev Services Dashboard",
   );
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [showOverview, setShowOverview] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [startAllInProgress, setStartAllInProgress] = useState(false);
@@ -294,6 +296,7 @@ function AppContent() {
 
   function switchTab(serviceID: string) {
     setActiveTabId(serviceID);
+    setShowOverview(false);
   }
 
   function toggleAutoScroll(serviceID: string) {
@@ -701,6 +704,8 @@ function AppContent() {
       <Header
         onStartAll={startAllServices}
         onStopAll={stopAllServices}
+        onToggleOverview={() => setShowOverview((v) => !v)}
+        overviewActive={showOverview}
         startAllInProgress={startAllInProgress}
         stopAllDisabled={!hasActiveServices}
         hasServices={!isLoading && activeServicesConfig.length > 0}
@@ -766,6 +771,12 @@ function AppContent() {
                 No services configured
               </div>
             </div>
+          ) : showOverview ? (
+            <ServiceOverview
+              services={activeServicesConfig}
+              serviceStatuses={serviceStatuses}
+              onSelect={switchTab}
+            />
           ) : (
             (() => {
               const activeService = activeServicesConfig.find(

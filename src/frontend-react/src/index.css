@@ -94,6 +94,18 @@ header {
   @apply cursor-not-allowed bg-gray-400;
 }
 
+.overview-header-btn {
+  @apply cursor-pointer whitespace-nowrap rounded border border-gray-300 dark:border-gray-500 bg-transparent px-3 py-1.5 text-sm font-medium text-white transition-colors;
+}
+
+.overview-header-btn:hover {
+  @apply bg-white/10;
+}
+
+.overview-header-btn.active {
+  @apply bg-white/20 border-white/60;
+}
+
 .stop-all-header-btn {
   @apply cursor-pointer whitespace-nowrap rounded border-none bg-error-500 px-3 py-1.5 text-sm font-medium text-white transition-colors;
   position: relative;
@@ -595,6 +607,39 @@ header {
 }
 .controls button.clear-logs-button:hover {
   @apply bg-gray-600;
+}
+
+/* Service overview grid */
+.overview {
+  @apply p-4;
+}
+
+.overview-title {
+  @apply text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100;
+}
+
+.overview-grid {
+  @apply grid gap-3;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.overview-card {
+  @apply flex items-center gap-2 text-left rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-3 cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-700;
+}
+
+.overview-card-name {
+  @apply flex-1 font-medium text-gray-800 dark:text-gray-100 truncate;
+}
+
+.overview-card-status {
+  @apply text-xs text-gray-500 dark:text-gray-400 flex-shrink-0;
+}
+/* Colored buttons must still look disabled when disabled — their color rules
+   above otherwise win over the generic :disabled style (equal specificity,
+   defined later). */
+.controls button.stop-button:disabled,
+.controls button.restart-button:disabled {
+  @apply bg-gray-400 cursor-not-allowed;
 }
 .controls .send-signal-select {
   @apply bg-primary-500 text-white border-none px-3 py-3 m-0 rounded cursor-pointer text-sm transition-colors h-[38px];

@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 interface HeaderProps {
   onStartAll?: () => void;
   onStopAll?: () => void;
+  onToggleOverview?: () => void;
+  overviewActive?: boolean;
   startAllInProgress?: boolean;
   stopAllDisabled?: boolean;
   hasServices?: boolean;
@@ -13,6 +15,8 @@ interface HeaderProps {
 function Header({
   onStartAll,
   onStopAll,
+  onToggleOverview,
+  overviewActive,
   startAllInProgress,
   stopAllDisabled,
   hasServices,
@@ -81,8 +85,18 @@ function Header({
     </div>
   );
 
-  const startButton = hasServices && (onStartAll || onStopAll) && (
+  const startButton = hasServices &&
+    (onStartAll || onStopAll || onToggleOverview) && (
     <div className="header-controls">
+      {onToggleOverview && (
+        <button
+          className={`overview-header-btn ${overviewActive ? "active" : ""}`}
+          onClick={onToggleOverview}
+          title="Overview of all services"
+        >
+          Overview
+        </button>
+      )}
       {onStartAll && (
         <button
           className="start-all-header-btn"
