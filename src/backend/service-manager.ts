@@ -632,6 +632,8 @@ export class ServiceManager {
         return;
       }
 
+      const leaderPid = service.process.pid;
+
       service.process.removeAllListeners("exit");
       service.process.on("exit", () => {
         this.logger.info(`Service ${service.name} confirmed stopped.`);
@@ -640,6 +642,18 @@ export class ServiceManager {
         this.broadcastStatus(serviceID, service.status, service.errorDetails);
         service.process = null;
         clearTimeout(timeout);
+        // The leader has exited, but members of its process group may still be
+        // alive (e.g. a child that ignored SIGTERM). Force-kill the group so
+        // stop never resolves while children are left holding ports. No-op if
+        // the group is already empty. This runs before resolve(), so callers
+        // (Stop All / shutdown) await the reap.
+        if (this.useProcessGroups && leaderPid !== undefined) {
+          try {
+            process.kill(-leaderPid, "SIGKILL");
+          } catch {
+            // Group already empty — nothing left to reap.
+          }
+        }
         resolve();
       });
 
@@ -652,7 +666,7 @@ export class ServiceManager {
           this.logger.warn(
             `Service ${service.name} did not stop gracefully with SIGTERM, sending SIGKILL.`,
           );
-          
+
           this.addLog(
             serviceID,
             `${service.name} did not stop gracefully, forcing SIGKILL.`,
@@ -662,8 +676,7 @@ export class ServiceManager {
           // Force-kill the whole group, plus any descendants that escaped it.
           // The walk runs while the process is still alive (so pids are
           // current), then we send the group SIGKILL once it's done.
-          const pid = service.process.pid;
-          void this.reapEscapedDescendants(pid).then(() => {
+          void this.reapEscapedDescendants(leaderPid).then(() => {
             this.stopSignal(service, "SIGKILL", true);
           });
         }

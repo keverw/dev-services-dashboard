@@ -76,6 +76,9 @@ function createMockProcess(): MockProcess {
       return proc;
     },
     emit(event, ...args) {
+      // Once a process exits, its pid/group is gone: deregister it so later
+      // process.kill(-pid) calls find nothing (like a real ESRCH no-op).
+      if (event === "exit") pidToProc.delete(proc.pid);
       (listeners[event] || []).forEach((cb) => cb(...args));
     },
     stdout: makeStream(),
@@ -262,10 +265,27 @@ describe("ServiceManager — core behavior", () => {
     const { sm } = makeManager([svc("a", { gracefulShutdown: true })]);
     await startAndRun(sm, "a");
     await sm.stopService("a");
-    // No group (negative-pid) signal was sent; SIGTERM went straight to the
-    // process so it can coordinate its own children.
-    expect(killSpy.mock.calls.some(([pid]) => Number(pid) < 0)).toBe(false);
+    // The SIGTERM went straight to the process (not the group) so it can
+    // coordinate its own children. (A group SIGKILL sweep still fires once the
+    // leader exits, as a safety net — that's asserted separately.)
+    expect(
+      killSpy.mock.calls.some(([p, sig]) => Number(p) < 0 && sig === "SIGTERM"),
+    ).toBe(false);
     expect(killLog.some((k) => k.signal === "SIGTERM")).toBe(true);
+    expect(sm.getService("a")?.status).toBe("stopped");
+  });
+
+  it("force-kills the process group once the leader exits (reaps stragglers)", async () => {
+    if (process.platform === "win32") return;
+    const { sm } = makeManager([svc("a")]);
+    await startAndRun(sm, "a");
+    const pid = spawnedProcesses[0].pid;
+    await sm.stopService("a");
+    // After the leader's exit, a group SIGKILL is sent so any child that
+    // outlived it (e.g. ignored SIGTERM) can't keep holding a port.
+    expect(
+      killSpy.mock.calls.some(([p, sig]) => p === -pid && sig === "SIGKILL"),
+    ).toBe(true);
     expect(sm.getService("a")?.status).toBe("stopped");
   });
 
