@@ -397,7 +397,11 @@ function AppContent() {
         break;
       case "error_from_server":
         if (data.message) {
-          alert(`Server error: ${data.message}`);
+          addToast({
+            message: `Server error: ${data.message}`,
+            type: "error",
+            duration: 5000,
+          });
         }
         break;
     }

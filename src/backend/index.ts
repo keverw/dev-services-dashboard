@@ -11,6 +11,43 @@ import { HttpHandler } from "./http-handler";
 import { createServer } from "http";
 import { WebSocketHandler } from "./web-socket-handler";
 
+// Module-level shutdown registry so multiple startDevServicesDashboard calls in
+// a single process share ONE pair of SIGINT/SIGTERM handlers instead of each
+// stacking its own (N handlers all racing to call process.exit). Each instance
+// registers its own shutdown routine; the shared handler runs them all, then
+// exits once. stop() unregisters, and the process listeners are removed once the
+// last dashboard is gone so stop() fully detaches the dashboard from the process.
+const activeShutdowns = new Set<(signal: string) => Promise<void>>();
+let processSignalsInstalled = false;
+
+const handleProcessSignal = (signal: string) => {
+  void (async () => {
+    await Promise.all([...activeShutdowns].map((fn) => fn(signal)));
+    process.exit(0);
+  })();
+};
+
+const sigintListener = () => handleProcessSignal("SIGINT");
+const sigtermListener = () => handleProcessSignal("SIGTERM");
+
+function registerShutdown(fn: (signal: string) => Promise<void>): void {
+  activeShutdowns.add(fn);
+  if (!processSignalsInstalled) {
+    processSignalsInstalled = true;
+    process.on("SIGINT", sigintListener);
+    process.on("SIGTERM", sigtermListener);
+  }
+}
+
+function unregisterShutdown(fn: (signal: string) => Promise<void>): void {
+  activeShutdowns.delete(fn);
+  if (activeShutdowns.size === 0 && processSignalsInstalled) {
+    processSignalsInstalled = false;
+    process.removeListener("SIGINT", sigintListener);
+    process.removeListener("SIGTERM", sigtermListener);
+  }
+}
+
 // --- Main export function ---
 export function startDevServicesDashboard(
   config: DevUIConfig,
@@ -81,8 +118,11 @@ export function startDevServicesDashboard(
         wsHandler.handleConnection(ws);
       });
 
-      // Shutdown handler
-      const handleShutdownSignal = async (signal: string) => {
+      // Per-instance shutdown routine, registered into the shared process-signal
+      // handler (which exits once after running every active dashboard's). This
+      // stops services and closes this instance's server but does NOT exit — the
+      // shared handler owns process.exit so multiple dashboards don't race it.
+      const shutdown = async (signal: string) => {
         logger.info(
           `Received ${signal}. Shutting down Dev Services Dashboard server and services...`,
         );
@@ -92,15 +132,9 @@ export function startDevServicesDashboard(
         logger.info("Stopping Dev Services Dashboard HTTP server...");
         httpServer.close();
         wsServer.close();
-        process.exit(0);
       };
 
-      // Store signal handler references for cleanup
-      const sigintHandler = () => handleShutdownSignal("SIGINT");
-      const sigtermHandler = () => handleShutdownSignal("SIGTERM");
-
-      process.on("SIGINT", sigintHandler);
-      process.on("SIGTERM", sigtermHandler);
+      registerShutdown(shutdown);
 
       // Start server
       httpServer.listen(PORT, HOSTNAME, () => {
@@ -113,9 +147,8 @@ export function startDevServicesDashboard(
           wsServer,
           port: PORT,
           stop: async () => {
-            // Remove signal handlers to prevent interference
-            process.removeListener("SIGINT", sigintHandler);
-            process.removeListener("SIGTERM", sigtermHandler);
+            // Detach this instance from the shared process-signal handler.
+            unregisterShutdown(shutdown);
 
             await serviceManager.stopAllServices();
             httpServer.close();
@@ -125,6 +158,9 @@ export function startDevServicesDashboard(
       });
 
       httpServer.on("error", (error) => {
+        // The instance never came up — detach it so a failed bind doesn't leave
+        // a registered shutdown (and a stray process-signal handler) behind.
+        unregisterShutdown(shutdown);
         logger.error(
           "Fatal error starting Dev Services Dashboard server:",
           error as object,

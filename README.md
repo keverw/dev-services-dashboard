@@ -186,7 +186,7 @@ The resolved `DevUIServer` object exposes:
 | ------------ | ------------------- | --------------------------------------------------------------------- |
 | `httpServer` | http.Server         | The underlying Node HTTP server                                       |
 | `wsServer`   | WebSocketServer     | The underlying `ws` WebSocket server                                  |
-| `port`       | number              | The port the server is listening on                                   |
+| `port`       | number              | The port the server is listening on (the normalized config `port`, a non-positive value falls back to the default `4000`) |
 | `stop`       | () => Promise<void> | Stops all running services, then closes the HTTP and WebSocket server |
 
 The dashboard's own UI talks to the server over `wsServer`, but it's the raw `ws` server, so you can attach your own listeners too. If you want to read the frames the server broadcasts (or send your own), the wire protocol types are exported: `ServerMessage` and `ClientMessage` (the discriminated unions for each direction), plus `InitialStateService`, `LogEntry`, `ServiceStatusValue`, and `StartAllResult` / `StopAllResult` (the per-service `result` values in the Start All / Stop All progress frames).
