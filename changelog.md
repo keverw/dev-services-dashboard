@@ -74,6 +74,8 @@
 - "Stop All" is likewise server-orchestrated and gets the same toast treatment — a pinned `Stopping services… (n/total)` progress toast that ends in a summary, with a short per-service toast as each shuts down — instead of a loose pile of per-service toasts where the last one lingered.
 - Fixed services not showing as "Disconnected" when the connection drops, and some notifications showing a service's internal id instead of its name.
 - Light/dark theme switching now fades smoothly instead of snapping (and doesn't animate on the initial page load).
+- All numeric config options now treat `0` as "unset" and fall back to their defaults (consistent with `port` / `maxLogLines`): the timeouts (`stopTimeout`, `startTimeout`, `beforeStartTimeout`, `afterStartTimeout`, plus the per-service `stopTimeout`) previously took `0` literally — e.g. `stopTimeout: 0` meant an immediate `SIGKILL` and `startTimeout: 0` a 0ms deadline.
+- Log lines now have their ANSI color codes stripped correctly: the previous pattern left a stray escape byte behind and could also eat legitimate text that merely looked like a code (e.g. `arr[0m]`). Logs are rendered as plain text, so color codes are intentionally removed.
 
 ### Tests
 

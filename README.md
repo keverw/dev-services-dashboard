@@ -15,6 +15,7 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
 - [Usage](#usage)
   - [Quick Setup](#quick-setup)
   - [Configuration Options](#configuration-options)
+    - [Return Value](#return-value)
   - [Service Configuration](#service-configuration)
     - [Web Links](#web-links)
     - [Custom Signals](#custom-signals)
@@ -53,7 +54,8 @@ Perfect for local development where you need to run multiple interdependent serv
 
 ## Features
 
-- **Real-time Logs**: View service logs as they happen
+- **Real-time Logs**: View service logs as they happen (ANSI color codes are stripped, since logs are rendered as plain text)
+- **Log Management**: Clear a service's log buffer from the UI ("Clear Logs") — clears it on the server and for all connected clients
 - **Service Controls**: Start, stop, restart services individually or all at once ("Start All" / "Stop All")
 - **Status Monitoring**: Visual indicators for service status
 - **Startup Ordering**: Declare `dependsOn` so services start in dependency order (and stop in reverse)
@@ -164,6 +166,31 @@ The `startDevServicesDashboard` function accepts a configuration object with the
 | `services`           | UserServiceConfig[]                | required                 | Array of service configurations                                                                                                                                               |
 | `logger`             | DevServicesDashboardLoggerFunction | none (no logging)        | Custom logger function for Dev Services Dashboard internal logs                                                                                                               |
 
+**Note**: All numeric options treat `0` as "unset" and fall back to their defaults — `port` (`4000`), `maxLogLines` (`200`), `stopTimeout` (`5000`), `startTimeout` (`10000`), and `beforeStartTimeout` / `afterStartTimeout` (`60000`), including the per-service `stopTimeout`. So there's no way to disable the log buffer with `maxLogLines: 0` (use a small positive number instead) or to force an immediate `SIGKILL` with `stopTimeout: 0`. Likewise, an empty-string `hostname` falls back to `localhost`.
+
+> **⚠️ Binding & network exposure**: `hostname` defaults to `localhost` (the loopback interface, `127.0.0.1`/`::1`), which only accepts connections from your own machine — other devices on the network can't reach it. Set it to `0.0.0.0` (bind **all** interfaces) or a specific interface IP to make the dashboard reachable from other devices on your LAN — but the dashboard has **no authentication** and can start, stop, and signal arbitrary processes on the host, so only expose it on a network you trust. (Note: `0.0.0.0` is the _most_ exposed binding, not the most private — it's the opposite of `localhost`.)
+
+#### Return Value
+
+`startDevServicesDashboard` is **async** — it returns a `Promise<DevUIServer>` that resolves once the HTTP server is listening (and rejects if it fails to bind, e.g. the port is in use). The examples in this README call it fire-and-forget for brevity, but for clean error handling and programmatic shutdown you'll usually want to `await` it:
+
+```typescript
+const dashboard = await startDevServicesDashboard({ services });
+// ... later, to shut down gracefully (stops all services, then closes the server):
+await dashboard.stop();
+```
+
+The resolved `DevUIServer` object exposes:
+
+| Property     | Type                | Description                                                           |
+| ------------ | ------------------- | --------------------------------------------------------------------- |
+| `httpServer` | http.Server         | The underlying Node HTTP server                                       |
+| `wsServer`   | WebSocketServer     | The underlying `ws` WebSocket server                                  |
+| `port`       | number              | The port the server is listening on                                   |
+| `stop`       | () => Promise<void> | Stops all running services, then closes the HTTP and WebSocket server |
+
+If you don't `await` (or `.catch()`) the promise, a bind failure surfaces as an unhandled promise rejection. The dashboard also installs `SIGINT`/`SIGTERM` handlers that stop all services and exit, so `Ctrl+C` shuts things down cleanly without calling `stop()` yourself.
+
 ### Service Configuration
 
 Each service is defined with the following properties:
@@ -181,7 +208,7 @@ Each service is defined with the following properties:
 | `beforeStart`      | (ctx: BeforeStartContext) => Promise<BeforeStartResult \| void> | No       | Async hook run before the process spawns; may return `{ env?, webLinks? }` ([Pre-start Hook](#pre-start-hook-beforestart))                                                                                                  |
 | `afterStart`       | (ctx: AfterStartContext) => Promise<AfterStartResult \| void>   | No       | Async readiness gate run after spawn, before `running`; throwing fails the startup; may return `{ webLinks? }` ([Post-start Hook](#post-start-hook-afterstart))                                                             |
 | `gracefulShutdown` | boolean                                                         | No       | Send the stop `SIGTERM` to only the main process (so it can shut down its own children) instead of the whole group. Forced `SIGKILL` still targets the group. Default `false` ([Process termination](#process-termination)) |
-| `stopTimeout`      | number                                                          | No       | Ms to wait after SIGTERM before escalating to SIGKILL for this service (overrides the global `stopTimeout`). Default `5000`                                                                                                 |
+| `stopTimeout`      | number                                                          | No       | Ms to wait after SIGTERM before escalating to SIGKILL for this service. Overrides the global `stopTimeout`; when unset it **inherits** the global value (which is `5000` unless you change it)                              |
 
 #### Web Links
 

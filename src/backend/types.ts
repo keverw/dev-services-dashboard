@@ -4,7 +4,9 @@ import { WebSocketServer } from "ws";
 // These backend types build on the shared wire protocol. We also re-export the
 // wire types so they're part of the published package's public surface (via
 // `export * from "./types"` in index.ts) — internal modules import them from
-// "@shared/protocol" directly.
+// "@shared/protocol" directly. They aren't needed for the documented API, but
+// let a consumer reading raw messages off `DevUIServer.wsServer` (the raw `ws`
+// server) type those messages, and they'll back the planned headless mode.
 import type {
   LogEntry,
   WebLink,
@@ -127,7 +129,8 @@ export interface UserServiceConfig {
   gracefulShutdown?: boolean;
   /**
    * How long (ms) to wait after SIGTERM before escalating to SIGKILL on stop.
-   * Overrides the global `stopTimeout`. Default: 5000.
+   * Overrides the global `stopTimeout`; when unset it inherits the global value
+   * (which is 5000 unless configured otherwise).
    */
   stopTimeout?: number;
 }
@@ -160,6 +163,13 @@ export interface Service {
 
 export interface DevUIConfig {
   port?: number;
+  /**
+   * Host/interface to bind the server to. Default: "localhost" (loopback only —
+   * reachable from this machine alone). Set to "0.0.0.0" (or a specific
+   * interface IP) to expose the dashboard on your LAN. Note: the dashboard has
+   * no authentication and can start/stop/signal processes on the host, so only
+   * bind to a non-loopback address on a trusted network.
+   */
   hostname?: string;
   maxLogLines?: number;
   defaultCwd?: string;

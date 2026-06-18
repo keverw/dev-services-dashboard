@@ -56,7 +56,9 @@ export class ServiceManager {
   private maxLogLines: number;
   private broadcastFn: (message: ServerMessage) => void;
   private logger: Logger;
-  // AbortControllers for services currently running their beforeStart hook.
+  // AbortControllers for services currently running a lifecycle hook
+  // (beforeStart or afterStart). Aborted when the service is stopped mid-hook,
+  // or (for afterStart) when the process exits on its own under the hook.
   private abortControllers = new Map<string, AbortController>();
   // On POSIX, services are spawned detached so each leads its own process
   // group, letting us signal the whole group (the spawned wrapper plus any
@@ -91,10 +93,13 @@ export class ServiceManager {
     this.maxLogLines = maxLogLines;
     this.broadcastFn = broadcastFn;
     this.logger = logger;
-    this.defaultStopTimeout = options.stopTimeout ?? 5000;
-    this.startTimeout = options.startTimeout ?? 10000;
-    this.beforeStartTimeout = options.beforeStartTimeout ?? 60000;
-    this.afterStartTimeout = options.afterStartTimeout ?? 60000;
+    // `||` (not `??`) so `0` falls back to the default, consistent with how
+    // `port` / `maxLogLines` are handled. A 0ms timeout would be meaningless
+    // (immediate SIGKILL / a 0ms start deadline), so we treat it as "unset".
+    this.defaultStopTimeout = options.stopTimeout || 5000;
+    this.startTimeout = options.startTimeout || 10000;
+    this.beforeStartTimeout = options.beforeStartTimeout || 60000;
+    this.afterStartTimeout = options.afterStartTimeout || 60000;
 
     // Convert user service configs to full service objects
     this.services = userServices.map((userService) => ({
@@ -200,7 +205,12 @@ export class ServiceManager {
     const service = this.getService(serviceID);
     if (!service) return;
 
-    const line = originalLine.replace(/\[[0-9;]*m/g, ""); // Strip ANSI escape codes
+    // Strip ANSI SGR (color/style) escape codes — the UI renders logs as plain
+    // text, so they'd just be noise. Requiring the leading ESC (\x1b) means we
+    // consume the whole sequence and don't clobber legitimate text that merely
+    // looks like a code (e.g. "arr[0m]").
+    // eslint-disable-next-line no-control-regex
+    const line = originalLine.replace(/\x1b\[[0-9;]*m/g, "");
 
     const logEntry: LogEntry = { timestamp: Date.now(), line, logType };
     service.logs.push(logEntry);
@@ -911,7 +921,9 @@ export class ServiceManager {
             this.stopSignal(service, "SIGKILL", true);
           });
         }
-      }, service.stopTimeout ?? this.defaultStopTimeout);
+        // `||` so a per-service `stopTimeout` of 0 falls back to the global
+        // default rather than meaning "SIGKILL immediately".
+      }, service.stopTimeout || this.defaultStopTimeout);
     });
   }
 
@@ -932,6 +944,9 @@ export class ServiceManager {
       service.status !== "error"
     ) {
       await this.stopService(serviceID);
+      // Brief settle pause between teardown and respawn: lets the OS finish
+      // releasing the old process's resources (e.g. its listening port) so the
+      // new process doesn't immediately hit EADDRINUSE on a fast restart.
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     await this.startService(serviceID);

@@ -28,7 +28,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,scss,md,html}\"",
     "lint": "eslint src",
     "update-readme": "markdown-toc-gen update README.md && bun run scripts/update-readme-version.ts",
-    "update-changelog": "markdown-toc-gen update CHANGELOG.md"
+    "update-changelog": "markdown-toc-gen update changelog.md"
   },
   "keywords": [
     "development",
