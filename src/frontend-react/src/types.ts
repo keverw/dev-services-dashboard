@@ -61,9 +61,13 @@ export interface WebSocketMessage {
   stopped?: number;
   services?: Array<{
     id: string;
+    name?: string;
     status: string;
     errorDetails?: string;
     logs: LogEntry[];
+    webLinks?: WebLink[];
+    signals?: ServiceSignal[];
+    dependsOn?: string[];
   }>;
   line?: string;
   logType?: string;

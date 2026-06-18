@@ -142,7 +142,8 @@ function AppContent() {
     switch (data.type) {
       case "initial_state":
         if (data.services) {
-          data.services.forEach((s) => {
+          const services = data.services;
+          services.forEach((s) => {
             updateServiceStatus(s.id, s.status, s.errorDetails);
             updateConnectionStatus(s.id, "connected", "Connected");
 
@@ -156,6 +157,18 @@ function AppContent() {
 
             setServiceLogs((prev) => ({ ...prev, [s.id]: logsText }));
           });
+
+          // Reconcile web links from the authoritative initial_state. A
+          // beforeStart/afterStart hook can change a service's links (and a
+          // stop reverts them to the baseline), and a links_update broadcast
+          // can be missed while disconnected — and /api/services-config is only
+          // fetched once on mount — so refresh them here on every (re)connect.
+          setActiveServicesConfig((prev) =>
+            prev.map((cfg) => {
+              const fresh = services.find((s) => s.id === cfg.id);
+              return fresh ? { ...cfg, webLinks: fresh.webLinks ?? [] } : cfg;
+            }),
+          );
         }
         break;
       case "log":
