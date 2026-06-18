@@ -124,6 +124,8 @@ import {
   parsePsOutput,
   collectDescendants,
   stripAnsi,
+  positiveOr,
+  nonEmptyStringOr,
 } from "./service-manager";
 import { Logger } from "./logger";
 import type { UserServiceConfig } from "./types";
@@ -1312,5 +1314,45 @@ describe("stripAnsi", () => {
 
   it("strips multiple sequences in one line", () => {
     expect(stripAnsi(`${ESC}[31ma${ESC}[0m${ESC}[2Kb${ESC}[1Gc`)).toBe("abc");
+  });
+});
+
+describe("positiveOr", () => {
+  it("keeps a finite positive number", () => {
+    expect(positiveOr(5000, 1234)).toBe(5000);
+    expect(positiveOr(1, 200)).toBe(1);
+    expect(positiveOr(0.5, 200)).toBe(0.5);
+  });
+
+  it("treats 0, negatives, and undefined as unset", () => {
+    expect(positiveOr(0, 200)).toBe(200);
+    expect(positiveOr(-1, 200)).toBe(200);
+    expect(positiveOr(-9999, 5000)).toBe(5000);
+    expect(positiveOr(undefined, 200)).toBe(200);
+  });
+
+  it("treats non-finite values as unset", () => {
+    expect(positiveOr(NaN, 200)).toBe(200);
+    expect(positiveOr(Infinity, 200)).toBe(200);
+    expect(positiveOr(-Infinity, 200)).toBe(200);
+  });
+});
+
+describe("nonEmptyStringOr", () => {
+  it("keeps a non-empty string, trimmed", () => {
+    expect(nonEmptyStringOr("0.0.0.0", "localhost")).toBe("0.0.0.0");
+    expect(nonEmptyStringOr("  localhost  ", "fallback")).toBe("localhost");
+  });
+
+  it("falls back on empty, whitespace-only, or undefined", () => {
+    expect(nonEmptyStringOr("", "localhost")).toBe("localhost");
+    expect(nonEmptyStringOr("   ", "localhost")).toBe("localhost");
+    expect(nonEmptyStringOr(undefined, "localhost")).toBe("localhost");
+  });
+
+  it("falls back on non-string values", () => {
+    expect(nonEmptyStringOr(123, "localhost")).toBe("localhost");
+    expect(nonEmptyStringOr(null, "localhost")).toBe("localhost");
+    expect(nonEmptyStringOr({}, "localhost")).toBe("localhost");
   });
 });

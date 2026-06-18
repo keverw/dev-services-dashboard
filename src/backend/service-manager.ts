@@ -66,6 +66,36 @@ export function collectDescendants(
   return result;
 }
 
+/**
+ * Numeric-option guard for the whole package. Returns `value` only when it is a
+ * finite number greater than zero; otherwise falls back to `fallback`. This is
+ * what makes every numeric option (port, maxLogLines, the timeouts) treat `0`,
+ * negatives, NaN, and non-finite values alike as "unset", so a bogus input
+ * can't silently disable the log buffer or collapse a timeout to an immediate
+ * 0ms deadline. Exported for testing.
+ */
+export function positiveOr(
+  value: number | undefined,
+  fallback: number,
+): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : fallback;
+}
+
+/**
+ * String-option guard mirroring `positiveOr` for string options (e.g.
+ * `hostname`). Returns the trimmed value when it's a non-empty string,
+ * otherwise the `fallback` — so a non-string, empty, or whitespace-only value
+ * falls back to the default. Trimming also drops stray surrounding whitespace
+ * that would otherwise make an address fail to bind. Exported for testing.
+ */
+export function nonEmptyStringOr(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : fallback;
+}
+
 // Reason used when a service's own process exits/crashes while its `afterStart`
 // hook is still running, so we abort the hook's AbortController (letting a
 // readiness hook that polls the process give up). It's distinguished from a
@@ -122,13 +152,14 @@ export class ServiceManager {
     this.maxLogLines = maxLogLines;
     this.broadcastFn = broadcastFn;
     this.logger = logger;
-    // `||` (not `??`) so `0` falls back to the default, consistent with how
-    // `port` / `maxLogLines` are handled. A 0ms timeout would be meaningless
-    // (immediate SIGKILL / a 0ms start deadline), so we treat it as "unset".
-    this.defaultStopTimeout = options.stopTimeout || 5000;
-    this.startTimeout = options.startTimeout || 10000;
-    this.beforeStartTimeout = options.beforeStartTimeout || 60000;
-    this.afterStartTimeout = options.afterStartTimeout || 60000;
+    // `positiveOr` (not `??`/`||`) so `0`, negatives, and non-finite values all
+    // fall back to the default, consistent with how `port` / `maxLogLines` are
+    // handled. A non-positive timeout would be meaningless (immediate SIGKILL /
+    // a 0ms start deadline), so we treat anything ≤ 0 as "unset".
+    this.defaultStopTimeout = positiveOr(options.stopTimeout, 5000);
+    this.startTimeout = positiveOr(options.startTimeout, 10000);
+    this.beforeStartTimeout = positiveOr(options.beforeStartTimeout, 60000);
+    this.afterStartTimeout = positiveOr(options.afterStartTimeout, 60000);
 
     // Convert user service configs to full service objects
     this.services = userServices.map((userService) => ({
@@ -697,13 +728,13 @@ export class ServiceManager {
       this.logger.warn(
         `Cannot send ${signal} to ${service.name}: service is ${service.status}.`,
       );
-      
+
       this.addLog(
         serviceID,
         `Refused to send "${signal}": service is ${service.status}, not running.`,
         "system",
       );
-      
+
       return;
     }
 
@@ -979,28 +1010,31 @@ export class ServiceManager {
       // its own children. Otherwise signal the whole process group.
       this.stopSignal(service, "SIGTERM", !service.gracefulShutdown);
 
-      const timeout = setTimeout(() => {
-        if (service.process) {
-          this.logger.warn(
-            `Service ${service.name} did not stop gracefully with SIGTERM, sending SIGKILL.`,
-          );
+      const timeout = setTimeout(
+        () => {
+          if (service.process) {
+            this.logger.warn(
+              `Service ${service.name} did not stop gracefully with SIGTERM, sending SIGKILL.`,
+            );
 
-          this.addLog(
-            serviceID,
-            `${service.name} did not stop gracefully, forcing SIGKILL.`,
-            "system",
-          );
+            this.addLog(
+              serviceID,
+              `${service.name} did not stop gracefully, forcing SIGKILL.`,
+              "system",
+            );
 
-          // Force-kill the whole group, plus any descendants that escaped it.
-          // The walk runs while the process is still alive (so pids are
-          // current), then we send the group SIGKILL once it's done.
-          void this.reapEscapedDescendants(leaderPid).then(() => {
-            this.stopSignal(service, "SIGKILL", true);
-          });
-        }
-        // `||` so a per-service `stopTimeout` of 0 falls back to the global
-        // default rather than meaning "SIGKILL immediately".
-      }, service.stopTimeout || this.defaultStopTimeout);
+            // Force-kill the whole group, plus any descendants that escaped it.
+            // The walk runs while the process is still alive (so pids are
+            // current), then we send the group SIGKILL once it's done.
+            void this.reapEscapedDescendants(leaderPid).then(() => {
+              this.stopSignal(service, "SIGKILL", true);
+            });
+          }
+          // `positiveOr` so a per-service `stopTimeout` of 0 (or negative) falls
+          // back to the global default rather than meaning "SIGKILL immediately".
+        },
+        positiveOr(service.stopTimeout, this.defaultStopTimeout),
+      );
     });
   }
 

@@ -1,6 +1,10 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { Logger } from "./logger";
-import { ServiceManager } from "./service-manager";
+import {
+  ServiceManager,
+  positiveOr,
+  nonEmptyStringOr,
+} from "./service-manager";
 import { DevUIConfig, DevUIServer } from "./types";
 import type { ServerMessage } from "@shared/protocol";
 import { HttpHandler } from "./http-handler";
@@ -11,9 +15,14 @@ import { WebSocketHandler } from "./web-socket-handler";
 export function startDevServicesDashboard(
   config: DevUIConfig,
 ): Promise<DevUIServer> {
-  const PORT = config.port || 4000;
-  const HOSTNAME = config.hostname || "localhost";
-  const MAX_LOG_LINES = config.maxLogLines || 200;
+  // `positiveOr` so 0, negatives, and non-finite values fall back to the
+  // default (a negative `maxLogLines` would otherwise empty the buffer on every
+  // line; a negative `port` is invalid). `nonEmptyStringOr` does the same for
+  // `hostname`: a non-string, empty, or whitespace-only value falls back to the
+  // default, and a valid one is trimmed so stray whitespace can't break binding.
+  const PORT = positiveOr(config.port, 4000);
+  const HOSTNAME = nonEmptyStringOr(config.hostname, "localhost");
+  const MAX_LOG_LINES = positiveOr(config.maxLogLines, 200);
 
   // Create logger - use provided logger or no logging if none provided
   const logger = new Logger(config.logger);
