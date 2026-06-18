@@ -471,7 +471,8 @@ header {
   @apply bg-success-500;
 }
 .status-initializing,
-.status-starting {
+.status-starting,
+.status-finalizing {
   @apply bg-warning-500 animate-pulse;
 }
 .status-stopping {

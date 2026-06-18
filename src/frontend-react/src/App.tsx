@@ -337,6 +337,12 @@ function AppContent() {
             type: "info",
             duration: 2000,
           });
+        } else if (data.result === "failed") {
+          addToast({
+            message: `${data.serviceName || data.serviceID} failed to stop`,
+            type: "error",
+            duration: 4000,
+          });
         }
 
         break;
@@ -344,16 +350,19 @@ function AppContent() {
         setStopAllInProgress(false);
         stopAllInProgressRef.current = false;
         const stopped = data.stopped ?? 0;
-        const summary =
+        const failed = data.failed ?? 0;
+        const base =
           stopped === 1 ? "1 service stopped" : `${stopped} services stopped`;
+        const summary = failed > 0 ? `${base}, ${failed} failed` : base;
         const toastId = stopAllProgressToastIdRef.current;
+        const summaryType = failed > 0 ? "error" : "info";
 
         if (toastId) {
-          updateToast(toastId, { message: summary, type: "info" });
+          updateToast(toastId, { message: summary, type: summaryType });
           setTimeout(() => removeToast(toastId), 4000);
           stopAllProgressToastIdRef.current = null;
         } else {
-          addToast({ message: summary, type: "info", duration: 4000 });
+          addToast({ message: summary, type: summaryType, duration: 4000 });
         }
 
         break;
@@ -536,13 +545,14 @@ function AppContent() {
   }
 
   // A service is considered "active" (and therefore stoppable) when it is
-  // running, initializing, starting, or stopping.
+  // running, initializing, starting, finalizing, or stopping.
   const hasActiveServices = activeServicesConfig.some((service) => {
     const status = serviceStatuses[service.id]?.status;
     return (
       status === "running" ||
       status === "initializing" ||
       status === "starting" ||
+      status === "finalizing" ||
       status === "stopping"
     );
   });
@@ -570,7 +580,7 @@ function AppContent() {
   }
 
   // Returns a service's declared dependencies that aren't currently up. A dep
-  // that's running or on its way up (starting/initializing) counts as fine.
+  // that's running or on its way up (starting/initializing/finalizing) is fine.
   function getUnmetDependencies(service: ServiceConfig) {
     if (!service.dependsOn || service.dependsOn.length === 0) return [];
     return service.dependsOn
@@ -580,7 +590,10 @@ function AppContent() {
         status: serviceStatuses[depId]?.status || "stopped",
       }))
       .filter(
-        (dep) => !["running", "starting", "initializing"].includes(dep.status),
+        (dep) =>
+          !["running", "starting", "initializing", "finalizing"].includes(
+            dep.status,
+          ),
       );
   }
 

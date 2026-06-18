@@ -29,6 +29,7 @@ export interface ServiceStatus {
     | "running"
     | "initializing"
     | "starting"
+    | "finalizing"
     | "stopping"
     | "error"
     | "crashed";

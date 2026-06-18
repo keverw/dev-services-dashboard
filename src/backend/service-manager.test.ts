@@ -554,6 +554,30 @@ describe("ServiceManager — startAllServices", () => {
   });
 });
 
+describe("ServiceManager — stopAllServices", () => {
+  it("reports a service as failed (not stopped) when its stop throws", async () => {
+    const { sm, broadcasts } = makeManager([svc("a"), svc("b")]);
+    await startAndRun(sm, "a");
+    await startAndRun(sm, "b");
+
+    // Make stopping "a" throw, leaving "b" to stop normally.
+    const original = sm.stopService.bind(sm);
+    sm.stopService = (id, opts) =>
+      id === "a" ? Promise.reject(new Error("kaboom")) : original(id, opts);
+
+    await sm.stopAllServices();
+
+    const progressA = broadcasts.find(
+      (m) => m.type === "stop_all_progress" && m.serviceID === "a",
+    );
+    expect(progressA?.result).toBe("failed");
+    expect(broadcasts.find((m) => m.type === "stop_all_done")).toMatchObject({
+      stopped: 1,
+      failed: 1,
+    });
+  });
+});
+
 // --- beforeStart hook -------------------------------------------------------
 
 describe("ServiceManager — beforeStart hook", () => {
@@ -681,6 +705,21 @@ describe("ServiceManager — beforeStart hook", () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
+  it("times out a hung beforeStart during Start All: errors it and never spawns", async () => {
+    const { sm } = makeManager([
+      svc("a", { beforeStart: () => new Promise<void>(() => {}) }), // never resolves
+      svc("b", { dependsOn: ["a"] }),
+    ]);
+    await sm.startAllServices();
+    await tick();
+
+    expect(sm.getService("a")?.status).toBe("error");
+    expect(sm.getService("a")?.errorDetails).toContain("beforeStart");
+    expect(spawnMock).not.toHaveBeenCalled();
+    // b depends on the timed-out service, so it's skipped (stays stopped).
+    expect(sm.getService("b")?.status).toBe("stopped");
+  });
+
   it("a hook returning void keeps the original env", async () => {
     const { sm } = makeManager([
       svc("a", {
@@ -696,6 +735,314 @@ describe("ServiceManager — beforeStart hook", () => {
       string
     >;
     expect(env.ORIG).toBe("1");
+  });
+});
+
+// --- afterStart hook --------------------------------------------------------
+
+describe("ServiceManager — afterStart hook", () => {
+  it("runs after spawn and promotes to running once it resolves", async () => {
+    let ranAfterSpawn = false;
+    const { sm } = makeManager([
+      svc("a", {
+        afterStart: async () => {
+          ranAfterSpawn = spawnMock.mock.calls.length > 0;
+        },
+      }),
+    ]);
+    await startAndRun(sm, "a");
+    expect(ranAfterSpawn).toBe(true);
+    expect(sm.getService("a")?.status).toBe("running");
+  });
+
+  it("sits in finalizing while the hook is pending, then goes running", async () => {
+    let release!: () => void;
+    const hookGate = new Promise<void>((r) => {
+      release = r;
+    });
+    const { sm } = makeManager([
+      svc("a", {
+        afterStart: async () => {
+          await hookGate;
+        },
+      }),
+    ]);
+
+    const startPromise = sm.startService("a");
+    await tick(); // spawn fires, hook starts
+    expect(sm.getService("a")?.status).toBe("finalizing");
+
+    release();
+    await startPromise;
+    await tick();
+    expect(sm.getService("a")?.status).toBe("running");
+  });
+
+  it("applies web links returned by the hook (as liveWebLinks) and broadcasts them", async () => {
+    const { sm, broadcasts } = makeManager([
+      svc("a", {
+        webLinks: [{ label: "Original", url: "http://x/1" }],
+        afterStart: async ({ webLinks }) => ({
+          webLinks: [...webLinks, { label: "Ready", url: "http://x/2" }],
+        }),
+      }),
+    ]);
+    await startAndRun(sm, "a");
+    expect(sm.getService("a")?.liveWebLinks).toEqual([
+      { label: "Original", url: "http://x/1" },
+      { label: "Ready", url: "http://x/2" },
+    ]);
+    expect(
+      broadcasts.some((b) => b.type === "links_update" && b.serviceID === "a"),
+    ).toBe(true);
+  });
+
+  it("extends beforeStart's links without accumulating across restarts", async () => {
+    const { sm } = makeManager([
+      svc("a", {
+        webLinks: [{ label: "Base", url: "http://x/0" }],
+        beforeStart: async ({ webLinks }) => ({
+          webLinks: [...webLinks, { label: "Pre", url: "http://x/1" }],
+        }),
+        afterStart: async ({ webLinks }) => ({
+          webLinks: [...webLinks, { label: "Post", url: "http://x/2" }],
+        }),
+      }),
+    ]);
+    const expected = [
+      { label: "Base", url: "http://x/0" },
+      { label: "Pre", url: "http://x/1" },
+      { label: "Post", url: "http://x/2" },
+    ];
+
+    await startAndRun(sm, "a");
+    expect(sm.getService("a")?.liveWebLinks).toEqual(expected);
+
+    // Restart: links rebuild from the baseline, so they don't accumulate.
+    await sm.stopService("a");
+    await startAndRun(sm, "a");
+    expect(sm.getService("a")?.liveWebLinks).toEqual(expected);
+  });
+
+  it("reverts links to the configured baseline when the service stops", async () => {
+    const { sm, broadcasts } = makeManager([
+      svc("a", {
+        webLinks: [{ label: "Base", url: "http://x/0" }],
+        afterStart: async ({ webLinks }) => ({
+          webLinks: [...webLinks, { label: "Live", url: "http://x/1" }],
+        }),
+      }),
+    ]);
+    await startAndRun(sm, "a");
+    expect(sm.getService("a")?.liveWebLinks).toEqual([
+      { label: "Base", url: "http://x/0" },
+      { label: "Live", url: "http://x/1" },
+    ]);
+
+    await sm.stopService("a");
+    await tick();
+    // Live links are dropped; the display falls back to the baseline, and the
+    // revert is broadcast so the dashboard updates.
+    expect(sm.getService("a")?.liveWebLinks).toBeUndefined();
+    const revert = broadcasts
+      .filter((b) => b.type === "links_update" && b.serviceID === "a")
+      .at(-1);
+    expect(revert?.webLinks).toEqual([{ label: "Base", url: "http://x/0" }]);
+  });
+
+  it("a throwing hook tears the process back down and ends in error", async () => {
+    const { sm } = makeManager([
+      svc("a", {
+        afterStart: async () => {
+          throw new Error("migration failed");
+        },
+      }),
+    ]);
+    await startAndRun(sm, "a");
+    await tick(); // let the teardown SIGTERM/exit settle
+    const service = sm.getService("a");
+    expect(service?.status).toBe("error");
+    expect(service?.errorDetails).toContain("migration failed");
+    expect(service?.process).toBeNull();
+  });
+
+  it("does not apply afterStart links if the process exited mid-hook", async () => {
+    let release!: (v: { webLinks: { label: string; url: string }[] }) => void;
+    const gate = new Promise<{ webLinks: { label: string; url: string }[] }>(
+      (r) => {
+        release = r;
+      },
+    );
+    const { sm } = makeManager([
+      svc("a", {
+        webLinks: [{ label: "Base", url: "http://x/0" }],
+        afterStart: () => gate,
+      }),
+    ]);
+
+    void sm.startService("a");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("finalizing");
+
+    // The process exits on its own (clean exit) while the hook is still pending.
+    const proc = spawnedProcesses.find((p) => p.spawnArgs?.cmd === "a")!;
+    proc.emit("exit", 0, null);
+    await tick();
+    expect(sm.getService("a")?.status).toBe("stopped");
+
+    // Hook now resolves with links — they must NOT be applied to a dead service.
+    release({ webLinks: [{ label: "Stale", url: "http://x/1" }] });
+    await tick();
+    expect(sm.getService("a")?.status).toBe("stopped"); // not promoted to running
+    expect(sm.getService("a")?.liveWebLinks).toBeUndefined(); // no stale links
+  });
+
+  it("ends in error when afterStart throws after the process already exited", async () => {
+    let reject!: (e: Error) => void;
+    const gate = new Promise<void>((_resolve, rej) => {
+      reject = rej;
+    });
+    const { sm } = makeManager([svc("a", { afterStart: () => gate })]);
+
+    void sm.startService("a");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("finalizing");
+
+    // Process exits cleanly first (would be "stopped" on its own).
+    const proc = spawnedProcesses.find((p) => p.spawnArgs?.cmd === "a")!;
+    proc.emit("exit", 0, null);
+    await tick();
+    expect(sm.getService("a")?.status).toBe("stopped");
+
+    // Hook then throws: the failed hook must win and settle the service on error.
+    reject(new Error("migration failed"));
+    await tick();
+    expect(sm.getService("a")?.status).toBe("error");
+    expect(sm.getService("a")?.errorDetails).toContain("migration failed");
+  });
+
+  it("stopping during finalizing aborts the hook and stops the service", async () => {
+    let release!: () => void;
+    const hookGate = new Promise<void>((r) => {
+      release = r;
+    });
+    let capturedSignal: AbortSignal | undefined;
+
+    const { sm } = makeManager([
+      svc("a", {
+        afterStart: async (ctx) => {
+          capturedSignal = ctx.signal;
+          await hookGate;
+        },
+      }),
+    ]);
+
+    const startPromise = sm.startService("a");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("finalizing");
+
+    await sm.stopService("a");
+    await tick();
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(sm.getService("a")?.status).toBe("stopped");
+
+    release();
+    await startPromise;
+    expect(sm.getService("a")?.status).toBe("stopped");
+  });
+
+  it("times out a hung afterStart during Start All: errors it and tears the process down", async () => {
+    const { sm, broadcasts } = makeManager([
+      svc("a", { afterStart: () => new Promise<void>(() => {}) }), // never resolves
+      svc("b", { dependsOn: ["a"] }),
+    ]);
+    // startAllServices awaits the timeout teardown, so by the time it resolves
+    // the process is already gone — no extra ticks needed.
+    await sm.startAllServices();
+
+    const a = sm.getService("a");
+    expect(a?.status).toBe("error");
+    expect(a?.errorDetails).toContain("afterStart");
+    expect(a?.process).toBeNull();
+    // b depends on the timed-out service, so it's skipped (stays stopped).
+    expect(sm.getService("b")?.status).toBe("stopped");
+    expect(broadcasts.find((x) => x.type === "start_all_done")).toMatchObject({
+      failed: 1,
+      skipped: 1,
+    });
+  });
+
+  it("Start All waits for an already in-flight service instead of restarting/killing it", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const { sm } = makeManager([
+      svc("a", {
+        afterStart: async () => {
+          await gate;
+        },
+      }),
+      svc("b", { dependsOn: ["a"] }),
+    ]);
+
+    // Start "a" manually; it spawns and parks in finalizing on the gated hook.
+    void sm.startService("a");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("finalizing");
+    const spawnsBefore = spawnMock.mock.calls.length;
+
+    // Start All while "a" is mid-hook: it should attach to the existing run
+    // (not respawn, not time it out), and wait before starting dependent "b".
+    const allPromise = sm.startAllServices();
+    await tick();
+    expect(sm.getService("a")?.status).toBe("finalizing"); // not error
+    expect(spawnMock.mock.calls.length).toBe(spawnsBefore); // not respawned
+    expect(sm.getService("b")?.status).toBe("stopped"); // b waits
+
+    release();
+    await allPromise;
+    expect(sm.getService("a")?.status).toBe("running");
+    expect(sm.getService("b")?.status).toBe("running");
+  });
+
+  it("Start All waits for afterStart before starting a dependent", async () => {
+    const order: string[] = [];
+    let releaseA!: () => void;
+    const aGate = new Promise<void>((r) => {
+      releaseA = r;
+    });
+    const { sm } = makeManager([
+      svc("a", {
+        afterStart: async () => {
+          order.push("a:afterStart-start");
+          await aGate;
+          order.push("a:afterStart-end");
+        },
+      }),
+      svc("b", {
+        dependsOn: ["a"],
+        beforeStart: async () => {
+          order.push("b:beforeStart");
+        },
+      }),
+    ]);
+
+    const allPromise = sm.startAllServices();
+    await tick();
+    // a is finalizing; b must not have begun starting yet.
+    expect(sm.getService("a")?.status).toBe("finalizing");
+    expect(order).toEqual(["a:afterStart-start"]);
+
+    releaseA();
+    await allPromise;
+    expect(order).toEqual([
+      "a:afterStart-start",
+      "a:afterStart-end",
+      "b:beforeStart",
+    ]);
+    expect(sm.getService("a")?.status).toBe("running");
+    expect(sm.getService("b")?.status).toBe("running");
   });
 });
 

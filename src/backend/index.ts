@@ -41,6 +41,7 @@ export function startDevServicesDashboard(
           stopTimeout: config.stopTimeout,
           startTimeout: config.startTimeout,
           beforeStartTimeout: config.beforeStartTimeout,
+          afterStartTimeout: config.afterStartTimeout,
         },
       );
 

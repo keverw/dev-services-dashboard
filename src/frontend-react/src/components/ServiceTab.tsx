@@ -60,6 +60,7 @@ function ServiceTab({
     currentStatus === "running" ||
     currentStatus === "initializing" ||
     currentStatus === "starting" ||
+    currentStatus === "finalizing" ||
     currentStatus === "stopping";
   const isStopDisabled =
     !connected ||
@@ -72,6 +73,7 @@ function ServiceTab({
     !connected ||
     currentStatus === "initializing" ||
     currentStatus === "starting" ||
+    currentStatus === "finalizing" ||
     currentStatus === "stopping";
   const isSignalDisabled = !connected || currentStatus !== "running";
 

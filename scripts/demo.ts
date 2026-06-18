@@ -23,6 +23,29 @@ const services: UserServiceConfig[] = [
     id: "db",
     name: "Database (PostgreSQL)",
     command: ["bun", "run", "scripts/demo-servers/db-server.ts"],
+    // Post-start hook: the process has already spawned, but the dashboard holds
+    // the service in a "finalizing" status (instead of "running") until this
+    // hook resolves — so it acts as a readiness gate. "Start All" waits for it
+    // before starting anything that depends on the DB. Here it simulates waiting
+    // for connections and running migrations; throwing would tear the process
+    // back down and mark the service "error" instead of letting it go "running".
+    afterStart: async ({ log, signal }) => {
+      log("Post-start: waiting for the database to accept connections...");
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 1500);
+        signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+
+      if (signal.aborted) {
+        log("Post-start aborted before completion.");
+        return;
+      }
+
+      log("Post-start: running migrations... done. Database ready.");
+    },
     // Note: These are demo URLs - they won't actually work since the demo servers don't expose these endpoints
     webLinks: [
       { label: "DB Admin", url: "http://localhost:5432/admin" },

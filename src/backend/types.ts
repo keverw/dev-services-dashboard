@@ -40,7 +40,47 @@ export interface BeforeStartContext {
 export interface BeforeStartResult {
   /** Replaces the env passed to the spawned process. */
   env?: Record<string, string>;
-  /** Replaces the service's web links (pushed live to the dashboard). */
+  /**
+   * Replaces the service's web links (pushed live to the dashboard). Omit (or
+   * return undefined/null) to leave them unchanged; return `[]` to clear them.
+   */
+  webLinks?: WebLink[];
+}
+
+/**
+ * Context passed to a service's `afterStart` hook. The hook runs after the
+ * process has spawned but before the service is reported `running` — so it acts
+ * as a readiness/post-start gate (e.g. wait for the port to accept connections,
+ * run a DB migration). Throwing tears the just-started process back down and
+ * puts the service into the `error` state.
+ */
+export interface AfterStartContext {
+  /** The env the process was spawned with. */
+  env: Record<string, string>;
+  /** The spawned process's pid (undefined only if it vanished immediately). */
+  pid: number | undefined;
+  /**
+   * The current live web links (a copy): the links a `beforeStart` on this
+   * service returned this run, or the configured baseline if there was none.
+   * Build from these (`[...webLinks, x]`) to extend rather than discard them.
+   */
+  webLinks: WebLink[];
+  /** Writes a "system" log line to the service's log stream. */
+  log: (line: string) => void;
+  /** Aborted if the service is stopped while the hook is still running. */
+  signal: AbortSignal;
+}
+
+/**
+ * What an `afterStart` hook may return. Any field left out keeps its value.
+ */
+export interface AfterStartResult {
+  /**
+   * Replaces the service's live web links (pushed live to the dashboard).
+   * Returning `[...webLinks, x]` (from the context's current links) keeps any
+   * a `beforeStart` already added; returning a fresh array discards them. Omit
+   * (or return undefined/null) to leave them unchanged; return `[]` to clear.
+   */
   webLinks?: WebLink[];
 }
 
@@ -63,6 +103,13 @@ export interface UserServiceConfig {
   signals?: ServiceSignal[];
   dependsOn?: string[];
   beforeStart?: (ctx: BeforeStartContext) => Promise<BeforeStartResult | void>;
+  /**
+   * Runs after the process has spawned but before the service is reported
+   * `running`. Use it as a readiness gate or post-start step (wait for a port,
+   * run a migration). Throwing tears the process back down and marks the service
+   * `error`; "Start All" waits for it to resolve before starting dependents.
+   */
+  afterStart?: (ctx: AfterStartContext) => Promise<AfterStartResult | void>;
   /**
    * When true, the graceful stop signal (SIGTERM) is sent to only the main
    * process instead of the whole process group, letting the process coordinate
@@ -95,6 +142,7 @@ export interface Service {
   signals?: ServiceSignal[];
   dependsOn?: string[];
   beforeStart?: (ctx: BeforeStartContext) => Promise<BeforeStartResult | void>;
+  afterStart?: (ctx: AfterStartContext) => Promise<AfterStartResult | void>;
   gracefulShutdown?: boolean;
   stopTimeout?: number;
   process: ChildProcess | null;
@@ -103,6 +151,7 @@ export interface Service {
     | "running"
     | "initializing"
     | "starting"
+    | "finalizing"
     | "stopping"
     | "error"
     | "crashed";
@@ -128,10 +177,18 @@ export interface DevUIConfig {
   startTimeout?: number;
   /**
    * How long (ms) "Start All" waits during a service's `beforeStart`
-   * (`initializing`) phase before giving up on it and moving on. The hook keeps
-   * running; Start All just stops blocking on it. Default: 60000.
+   * (`initializing`) phase before treating it as a failed start: the hook is
+   * aborted and the service is put into `error` (its dependents are skipped).
+   * Default: 60000.
    */
   beforeStartTimeout?: number;
+  /**
+   * How long (ms) "Start All" waits during a service's `afterStart`
+   * (`finalizing`) phase before treating it as a failed start: the hook is
+   * aborted, the started process is torn down, and the service is put into
+   * `error` (its dependents are skipped). Default: 60000.
+   */
+  afterStartTimeout?: number;
   services: UserServiceConfig[];
   logger?: DevServicesDashboardLoggerFunction;
 }
