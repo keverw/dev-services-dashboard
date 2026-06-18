@@ -363,6 +363,36 @@ describe("Dev Services Dashboard", () => {
 
       await server.stop();
     });
+
+    it("trims a custom dashboard name and falls back when blank", async () => {
+      const port = await getPort();
+      const customConfig: DevUIConfig = {
+        port,
+        dashboardName: "   ",
+        services: [
+          {
+            id: "test",
+            name: "Test Service",
+            command: ["echo", "test"],
+          },
+        ],
+      };
+
+      const server = await startDevServicesDashboard(customConfig);
+
+      const response = await fetch(
+        `http://localhost:${server.port}/api/services-config`,
+      );
+      const data = await response.json();
+
+      // A whitespace-only name falls back to the default rather than rendering
+      // an empty title.
+      expect(data).toMatchObject({
+        dashboardName: "Dev Services Dashboard",
+      });
+
+      await server.stop();
+    });
   });
 
   describe("Error Handling", () => {

@@ -23,6 +23,12 @@ export function startDevServicesDashboard(
   const PORT = positiveOr(config.port, 4000);
   const HOSTNAME = nonEmptyStringOr(config.hostname, "localhost");
   const MAX_LOG_LINES = positiveOr(config.maxLogLines, 200);
+  // Same guard as `hostname`: a non-string, empty, or whitespace-only
+  // `dashboardName` falls back to the default, and a valid one is trimmed.
+  const DASHBOARD_NAME = nonEmptyStringOr(
+    config.dashboardName,
+    "Dev Services Dashboard",
+  );
 
   // Create logger - use provided logger or no logging if none provided
   const logger = new Logger(config.logger);
@@ -59,7 +65,7 @@ export function startDevServicesDashboard(
       const httpHandler = new HttpHandler(
         logger,
         serviceManager,
-        config.dashboardName,
+        DASHBOARD_NAME,
       );
 
       // Create HTTP server
