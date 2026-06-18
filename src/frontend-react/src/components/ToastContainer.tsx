@@ -1,11 +1,13 @@
+import { CSSProperties } from "react";
 import { useToast, Toast } from "../contexts/ToastContext";
 
 interface ToastItemProps {
   toast: Toast;
   onRemove: (id: string) => void;
+  style?: CSSProperties;
 }
 
-function ToastItem({ toast, onRemove }: ToastItemProps) {
+function ToastItem({ toast, onRemove, style }: ToastItemProps) {
   const getToastClass = () => {
     let baseClass = "toast-item";
 
@@ -41,7 +43,7 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
   };
 
   return (
-    <div className={getToastClass()}>
+    <div className={getToastClass()} style={style}>
       <div className="toast-icon">{getIcon()}</div>
       <div className="toast-message">{toast.message}</div>
       <button
@@ -64,16 +66,21 @@ function ToastContainer() {
 
   // Pin sticky toasts (duration 0, e.g. the Start All progress toast) to the
   // top so transient per-service toasts stream in below them rather than
-  // shoving them down.
-  const ordered = [
-    ...toasts.filter((t) => t.duration === 0),
-    ...toasts.filter((t) => t.duration !== 0),
-  ];
-
+  // shoving them down. We keep the rendered (DOM) order stable — newest first,
+  // as added — and pin via CSS `order` instead of re-sorting the array. Moving
+  // DOM nodes between renders restarts their slide animations and causes a
+  // visible jump; CSS `order` repositions them without touching the nodes.
   return (
     <div className="toast-container">
-      {ordered.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onRemove={removeToast} />
+      {toasts.map((toast) => (
+        <ToastItem
+          key={toast.id}
+          toast={toast}
+          onRemove={removeToast}
+          // Lower `order` floats to the top of the flex column. Sticky toasts
+          // get -1 so they sit above transient ones (default 0).
+          style={{ order: toast.duration === 0 ? -1 : 0 }}
+        />
       ))}
     </div>
   );

@@ -555,6 +555,15 @@ describe("ServiceManager — startAllServices", () => {
 });
 
 describe("ServiceManager — stopAllServices", () => {
+  it("stays silent when there are no running services to stop", async () => {
+    // Server shutdown with nothing running should not broadcast a begin/done
+    // pair — that rendered a confusing "0 services stopped" toast in the UI.
+    const { sm, broadcasts } = makeManager([svc("a"), svc("b")]);
+    await sm.stopAllServices();
+    expect(broadcasts.find((b) => b.type === "stop_all_begin")).toBeUndefined();
+    expect(broadcasts.find((b) => b.type === "stop_all_done")).toBeUndefined();
+  });
+
   it("reports a service as failed (not stopped) when its stop throws", async () => {
     const { sm, broadcasts } = makeManager([svc("a"), svc("b")]);
     await startAndRun(sm, "a");

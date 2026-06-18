@@ -964,6 +964,15 @@ export class ServiceManager {
     const total = toStop.length;
     let stopped = 0;
     let failed = 0;
+
+    // Nothing running (e.g. server shutdown with no active services). Stay
+    // silent rather than broadcasting a begin/done pair that renders a
+    // confusing "0 services stopped" toast right before the socket closes.
+    if (total === 0) {
+      this.logger.info("All services stopped.");
+      return;
+    }
+
     this.broadcastFn({ type: "stop_all_begin", total });
 
     try {
