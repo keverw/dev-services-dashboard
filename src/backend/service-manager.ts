@@ -43,6 +43,13 @@ export function collectDescendants(
   return result;
 }
 
+// Reason used when a service's own process exits/crashes while its `afterStart`
+// hook is still running, so we abort the hook's AbortController (letting a
+// readiness hook that polls the process give up). It's distinguished from a
+// stop-driven abort (default reason) so a throwing afterStart still settles the
+// service on `error` rather than being treated as an intentional stop.
+const HOOK_ABORT_PROCESS_EXIT = "process-exited";
+
 export class ServiceManager {
   private services: Service[] = [];
   private maxLogLines: number;
@@ -399,6 +406,12 @@ export class ServiceManager {
       service.process.on("exit", (code, signal) => {
         const wasStopping = service.status === "stopping";
 
+        // If an afterStart hook is still running when the process dies on its
+        // own, abort its signal so a readiness hook polling the (now dead)
+        // process can give up. The exit reason keeps this distinct from a stop
+        // so a throwing hook still settles on `error` (see runAfterStart).
+        this.abortControllers.get(serviceID)?.abort(HOOK_ABORT_PROCESS_EXIT);
+
         // Determine exit type and status
         let newStatus: Service["status"];
         let exitType: string;
@@ -523,8 +536,11 @@ export class ServiceManager {
         signal: controller.signal,
       });
 
-      // The user stopped the service while the hook ran (stopService already
-      // tore the process down and set the status); don't override it.
+      // The hook was aborted (the user stopped the service, or the process
+      // exited under it) — something else already set the terminal status, so
+      // don't promote to running or apply links. (The status check below also
+      // covers the process-exit case; this also covers an abort the hook
+      // swallowed without its status having changed yet.)
       if (controller.signal.aborted) {
         clearOwnController();
         return;
@@ -551,9 +567,24 @@ export class ServiceManager {
       this.addLog(serviceID, `${service.name} started successfully.`, "system");
       this.broadcastStatus(serviceID, service.status);
     } catch (err) {
+      // If a newer start has replaced our controller, this run is stale (the
+      // service was stopped/restarted while a signal-ignoring hook kept
+      // running) — it must not touch the service the current run now owns.
+      // Capture before clearOwnController, which would drop our own entry.
+      const superseded = this.abortControllers.get(serviceID) !== controller;
       clearOwnController();
-      // An abort during the hook is an intentional stop, not a failure.
-      if (controller.signal.aborted) return;
+
+      // A stop-driven abort is an intentional stop, not a failure, so bail —
+      // stopService already set the status. An exit-driven abort (the process
+      // died under the hook) is NOT a clean stop: fall through so a thrown hook
+      // still settles the service on `error` — but only while we're still the
+      // current run.
+      if (
+        superseded ||
+        (controller.signal.aborted &&
+          controller.signal.reason !== HOOK_ABORT_PROCESS_EXIT)
+      )
+        return;
 
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(

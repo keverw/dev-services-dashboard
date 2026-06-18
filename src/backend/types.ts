@@ -67,7 +67,13 @@ export interface AfterStartContext {
   webLinks: WebLink[];
   /** Writes a "system" log line to the service's log stream. */
   log: (line: string) => void;
-  /** Aborted if the service is stopped while the hook is still running. */
+  /**
+   * Aborted if the service is stopped while the hook runs, or if the process
+   * exits/crashes on its own under it — so a readiness check that polls the
+   * process (e.g. `await waitForPort(port, { signal })`) can give up. Note a
+   * hook that throws is still treated as a failed start (`error`) even when the
+   * throw was its response to this abort.
+   */
   signal: AbortSignal;
 }
 

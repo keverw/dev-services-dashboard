@@ -921,6 +921,78 @@ describe("ServiceManager — afterStart hook", () => {
     expect(sm.getService("a")?.errorDetails).toContain("migration failed");
   });
 
+  it("aborts the afterStart signal when the process exits mid-hook", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const { sm } = makeManager([
+      svc("a", {
+        afterStart: async (ctx) => {
+          capturedSignal = ctx.signal;
+          await gate; // stand in for a readiness poll
+        },
+      }),
+    ]);
+
+    void sm.startService("a");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("finalizing");
+    expect(capturedSignal?.aborted).toBe(false);
+
+    // The process crashes on its own while the hook is mid-poll: the signal
+    // must fire so a real readiness check could give up.
+    const proc = spawnedProcesses.find((p) => p.spawnArgs?.cmd === "a")!;
+    proc.emit("exit", null, "SIGSEGV");
+    await tick();
+    expect(capturedSignal?.aborted).toBe(true);
+
+    // Hook finishes after noticing; the crash status stands (no promotion).
+    release();
+    await tick();
+    expect(sm.getService("a")?.status).toBe("crashed");
+  });
+
+  it("a stale afterStart throwing late does not clobber a restarted service", async () => {
+    let throwOld!: (e: Error) => void;
+    const firstHook = new Promise<void>((_resolve, reject) => {
+      throwOld = reject;
+    });
+    let firstRun = true;
+    const { sm } = makeManager([
+      svc("a", {
+        afterStart: () => {
+          if (firstRun) {
+            firstRun = false;
+            return firstHook; // run 1: hangs, ignores the abort
+          }
+          return Promise.resolve(); // run 2: comes up clean
+        },
+      }),
+    ]);
+
+    // Run 1 reaches finalizing, then its process crashes on its own.
+    void sm.startService("a");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("finalizing");
+    const proc1 = spawnedProcesses.find((p) => p.spawnArgs?.cmd === "a")!;
+    proc1.emit("exit", null, "SIGSEGV");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("crashed");
+
+    // Restart: run 2 spawns and comes up running.
+    await startAndRun(sm, "a");
+    expect(sm.getService("a")?.status).toBe("running");
+
+    // The stale run-1 hook finally throws — it must not tear down run 2.
+    throwOld(new Error("late failure"));
+    await tick();
+    await tick();
+    expect(sm.getService("a")?.status).toBe("running");
+    expect(sm.getService("a")?.process).not.toBeNull();
+  });
+
   it("stopping during finalizing aborts the hook and stops the service", async () => {
     let release!: () => void;
     const hookGate = new Promise<void>((r) => {
