@@ -272,7 +272,7 @@ console.log("📍 Open your browser to: http://localhost:4000");
 console.log("");
 console.log("🔧 Demo Features:");
 console.log(
-  "  • Twelve simulated services representing a full microservices stack",
+  "  • Eighteen simulated services representing a full microservices stack",
 );
 console.log("  • Database servers (PostgreSQL, MongoDB, Redis, Elasticsearch)");
 console.log("  • API services (Main API, Auth, Notifications, WebSocket)");
@@ -284,7 +284,7 @@ console.log("  • Start/stop/restart individual services or all at once");
 console.log(
   "  • dependsOn ordering (api waits for db/db2/redis; ssr/admin wait for api/auth)",
 );
-console.log("  • Custom signals dropdown (SIGHUP/SIGUSR1) on api/auth/ssr");
+console.log("  • Custom signals dropdown (SIGHUP/SIGUSR2) on api/auth/ssr");
 console.log("  • beforeStart pre-start hook on the API server (warm-up step)");
 console.log("  • Real-time log streaming with auto-scroll");
 console.log("  • Service status indicators and connection monitoring");

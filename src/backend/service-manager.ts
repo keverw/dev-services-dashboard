@@ -162,7 +162,31 @@ export class ServiceManager {
    * to start rather than run in a misleading order.
    */
   private computeStartOrder(): void {
-    const idSet = new Set(this.services.map((s) => s.id));
+    // Validate the basic config up front. IDs must be unique (they key every
+    // lookup, `dependsOn` reference, and the per-service UI — a duplicate would
+    // silently shadow the earlier service), and each `command` must be a
+    // non-empty string array whose first element (the executable) is a
+    // non-empty string. We reject these here rather than fail obscurely later.
+    const idSet = new Set<string>();
+    for (const service of this.services) {
+      if (idSet.has(service.id)) {
+        throw new Error(
+          `Invalid service configuration: duplicate service id "${service.id}".`,
+        );
+      }
+      idSet.add(service.id);
+
+      if (
+        !Array.isArray(service.command) ||
+        service.command.length === 0 ||
+        typeof service.command[0] !== "string" ||
+        service.command[0].length === 0
+      ) {
+        throw new Error(
+          `Invalid service configuration: "${service.id}" has an empty or invalid command (expected a non-empty string[] whose first element is the executable).`,
+        );
+      }
+    }
 
     // Sanitize dependsOn: reject self-dependencies, drop unknown service IDs.
     for (const service of this.services) {

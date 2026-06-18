@@ -487,6 +487,22 @@ describe("ServiceManager — dependsOn ordering", () => {
     );
   });
 
+  it("throws on a duplicate service id", () => {
+    expect(() => makeManager([svc("a"), svc("a")])).toThrow(/duplicate/);
+  });
+
+  it("throws on an empty command", () => {
+    expect(() => makeManager([svc("a", { command: [] })])).toThrow(
+      /empty or invalid command/,
+    );
+  });
+
+  it("throws on a command whose first element is an empty string", () => {
+    expect(() => makeManager([svc("a", { command: [""] })])).toThrow(
+      /empty or invalid command/,
+    );
+  });
+
   it("warns and ignores unknown dependsOn IDs", () => {
     const { sm, logs } = makeManager([svc("x", { dependsOn: ["ghost"] })]);
     expect(sm.getService("x")?.dependsOn).toEqual([]);

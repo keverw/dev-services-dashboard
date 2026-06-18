@@ -150,5 +150,10 @@ export type {
   InitialStateService,
   LogEntry,
   ServiceStatusValue,
+  // Per-service outcomes carried in the Start All / Stop All progress frames'
+  // `result` field (part of `ServerMessage`); exported so consumers reading
+  // those frames can name the type directly.
+  StartAllResult,
+  StopAllResult,
 } from "@shared/protocol";
 export { createConsoleLogger } from "./logger";

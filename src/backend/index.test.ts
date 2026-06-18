@@ -366,24 +366,24 @@ describe("Dev Services Dashboard", () => {
   });
 
   describe("Error Handling", () => {
-    it("should handle server startup errors gracefully", async () => {
-      // Test that the server can handle configuration errors
+    it("rejects startup on invalid service config", async () => {
+      // An empty command can't be spawned, so the dashboard rejects the start
+      // rather than booting with an unusable service.
       const port = await getPort();
       const invalidConfig: DevUIConfig = {
         port,
         services: [
           {
-            id: "", // Invalid empty ID
+            id: "broken",
             name: "Invalid Service",
             command: [],
           },
         ],
       };
 
-      // Server should still start even with invalid service config
-      const server = await startDevServicesDashboard(invalidConfig);
-      expect(server).toBeDefined();
-      await server.stop();
+      await expect(startDevServicesDashboard(invalidConfig)).rejects.toThrow(
+        /empty or invalid command/,
+      );
     });
 
     it("should handle malformed WebSocket messages", async () => {

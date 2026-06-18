@@ -115,6 +115,8 @@ export interface UserServiceConfig {
    * shutting down its own children (e.g. to test graceful shutdown / signal
    * forwarding). The forced SIGKILL still targets the whole group as a safety
    * net so nothing is orphaned. Default: false (signal the whole group).
+   * No effect on Windows, where process groups aren't used and stop always
+   * signals just the launched process.
    */
   gracefulShutdown?: boolean;
   /**
