@@ -126,6 +126,29 @@ export function startDevServicesDashboard(
   });
 }
 
-// Export all types and functions from the module
-export * from "./types";
+// Public type surface. Kept explicit (rather than `export *`) so internal
+// runtime types like `Service` stay out of the published API.
+export type {
+  DevUIConfig,
+  DevUIServer,
+  UserServiceConfig,
+  DevServicesDashboardLoggerFunction,
+  BeforeStartContext,
+  BeforeStartResult,
+  AfterStartContext,
+  AfterStartResult,
+} from "./types";
+// `WebLink` / `ServiceSignal` live in the shared wire protocol but are part of
+// the documented config surface (they appear in `UserServiceConfig`).
+export type { WebLink, ServiceSignal } from "@shared/protocol";
+// The wire protocol types for the WebSocket frames sent over `DevUIServer.wsServer`.
+// Exported so a consumer reading raw messages off the exposed `ws` server can
+// type them (and to back the future potentially planned headless mode).
+export type {
+  ServerMessage,
+  ClientMessage,
+  InitialStateService,
+  LogEntry,
+  ServiceStatusValue,
+} from "@shared/protocol";
 export { createConsoleLogger } from "./logger";

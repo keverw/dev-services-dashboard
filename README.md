@@ -54,7 +54,7 @@ Perfect for local development where you need to run multiple interdependent serv
 
 ## Features
 
-- **Real-time Logs**: View service logs as they happen (ANSI color codes are stripped, since logs are rendered as plain text)
+- **Real-time Logs**: View service logs as they happen (ANSI escape sequences — color/style plus cursor moves and clear-line/clear-screen codes — are stripped, since logs are rendered as plain text)
 - **Log Management**: Clear a service's log buffer from the UI ("Clear Logs") — clears it on the server and for all connected clients
 - **Service Controls**: Start, stop, restart services individually or all at once ("Start All" / "Stop All")
 - **Status Monitoring**: Visual indicators for service status
@@ -152,19 +152,19 @@ Perfect for local development where you need to run multiple interdependent serv
 
 The `startDevServicesDashboard` function accepts a configuration object with the following properties:
 
-| Option               | Type                               | Default                  | Description                                                                                                                                                                   |
-| -------------------- | ---------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `port`               | number                             | 4000                     | The port to run the Dev Services Dashboard server on                                                                                                                          |
-| `hostname`           | string                             | 'localhost'              | The hostname to bind the server to                                                                                                                                            |
-| `maxLogLines`        | number                             | 200                      | Maximum number of log lines to keep in memory per service                                                                                                                     |
-| `defaultCwd`         | string                             | process.cwd()            | Default working directory for services                                                                                                                                        |
-| `dashboardName`      | string                             | 'Dev Services Dashboard' | Custom name for the dashboard displayed in the UI and page title                                                                                                              |
-| `stopTimeout`        | number                             | 5000                     | Default ms to wait after SIGTERM before escalating to SIGKILL on stop (per-service `stopTimeout` overrides)                                                                   |
-| `startTimeout`       | number                             | 10000                    | Ms "Start All" waits for a service to report `running` after it begins spawning before failing it (tears the process down, marks it `error`, skips its dependents)            |
-| `beforeStartTimeout` | number                             | 60000                    | Ms "Start All" waits during a service's `beforeStart` (`initializing`) phase before failing it (aborts the hook, marks it `error`, skips its dependents)                      |
-| `afterStartTimeout`  | number                             | 60000                    | Ms "Start All" waits during a service's `afterStart` (`finalizing`) phase before failing it (aborts the hook, tears the process down, marks it `error`, skips its dependents) |
-| `services`           | UserServiceConfig[]                | required                 | Array of service configurations                                                                                                                                               |
-| `logger`             | DevServicesDashboardLoggerFunction | none (no logging)        | Custom logger function for Dev Services Dashboard internal logs                                                                                                               |
+| Option               | Type                               | Default                  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------- | ---------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `port`               | number                             | 4000                     | The port to run the Dev Services Dashboard server on                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `hostname`           | string                             | 'localhost'              | The hostname to bind the server to                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `maxLogLines`        | number                             | 200                      | Maximum number of log lines to keep in memory per service                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `defaultCwd`         | string                             | process.cwd()            | Default working directory for services                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `dashboardName`      | string                             | 'Dev Services Dashboard' | Custom name for the dashboard displayed in the UI and page title                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `stopTimeout`        | number                             | 5000                     | Default ms to wait after SIGTERM before escalating to SIGKILL on stop (per-service `stopTimeout` overrides)                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `startTimeout`       | number                             | 10000                    | The **spawn window only**: ms a start waits for the process to come up — reaching `running`, or entering `finalizing` if the service has an `afterStart` hook — before failing it (tears the process down, marks it `error`). The `beforeStart`/`afterStart` phases are bounded **separately** by `beforeStartTimeout` / `afterStartTimeout`, so a service with hooks can take up to their sum to reach `running`, not `startTimeout` alone. Applies to any start — manual, restart, or "Start All" (which then also skips its dependents) |
+| `beforeStartTimeout` | number                             | 60000                    | Ms a start waits during a service's `beforeStart` (`initializing`) phase before failing it (aborts the hook, marks it `error`). Applies to any start — manual, restart, or "Start All" (which then also skips its dependents)                                                                                                                                                                                                                                                                                                              |
+| `afterStartTimeout`  | number                             | 60000                    | Ms a start waits during a service's `afterStart` (`finalizing`) phase before failing it (aborts the hook, tears the process down, marks it `error`). Applies to any start — manual, restart, or "Start All" (which then also skips its dependents)                                                                                                                                                                                                                                                                                         |
+| `services`           | UserServiceConfig[]                | required                 | Array of service configurations                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `logger`             | DevServicesDashboardLoggerFunction | none (no logging)        | Custom logger function for Dev Services Dashboard internal logs                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 **Note**: All numeric options treat `0` as "unset" and fall back to their defaults — `port` (`4000`), `maxLogLines` (`200`), `stopTimeout` (`5000`), `startTimeout` (`10000`), and `beforeStartTimeout` / `afterStartTimeout` (`60000`), including the per-service `stopTimeout`. So there's no way to disable the log buffer with `maxLogLines: 0` (use a small positive number instead) or to force an immediate `SIGKILL` with `stopTimeout: 0`. Likewise, an empty-string `hostname` falls back to `localhost`.
 
@@ -189,6 +189,21 @@ The resolved `DevUIServer` object exposes:
 | `port`       | number              | The port the server is listening on                                   |
 | `stop`       | () => Promise<void> | Stops all running services, then closes the HTTP and WebSocket server |
 
+The dashboard's own UI talks to the server over `wsServer`, but it's the raw `ws` server, so you can attach your own listeners too. If you want to read the frames the server broadcasts (or send your own), the wire protocol types are exported: `ServerMessage` and `ClientMessage` (the discriminated unions for each direction), plus `InitialStateService`, `LogEntry`, and `ServiceStatusValue`.
+
+A service is always in exactly one `ServiceStatusValue` state:
+
+| Status         | Meaning                                                                                                                          |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `stopped`      | Not running: the initial state, the result of a stop, a clean exit (code `0`), or termination by `SIGTERM`/`SIGINT`              |
+| `initializing` | Running its `beforeStart` hook — the process has not spawned yet (bounded by `beforeStartTimeout`)                               |
+| `starting`     | The process is being spawned — between the spawn and reaching `running`/`finalizing` (bounded by `startTimeout`)                 |
+| `finalizing`   | The process is up and running its `afterStart` readiness hook, not yet reported ready (bounded by `afterStartTimeout`)           |
+| `running`      | Up and ready — hooks (if any) have completed                                                                                     |
+| `stopping`     | A stop is in progress: `SIGTERM` has been sent and the dashboard is waiting for the process to exit (or to escalate to SIGKILL)  |
+| `error`        | A start failed — a hook threw or timed out, or the process exited non-zero with a "normal" code (any code `1`–`127`)             |
+| `crashed`      | The process died abnormally — force-killed (`SIGKILL`), killed by a crash signal (e.g. `SIGSEGV`), or exited with a code ≥ `128` |
+
 If you don't `await` (or `.catch()`) the promise, a bind failure surfaces as an unhandled promise rejection. The dashboard also installs `SIGINT`/`SIGTERM` handlers that stop all services and exit, so `Ctrl+C` shuts things down cleanly without calling `stop()` yourself.
 
 ### Service Configuration
@@ -209,6 +224,8 @@ Each service is defined with the following properties:
 | `afterStart`       | (ctx: AfterStartContext) => Promise<AfterStartResult \| void>   | No       | Async readiness gate run after spawn, before `running`; throwing fails the startup; may return `{ webLinks? }` ([Post-start Hook](#post-start-hook-afterstart))                                                             |
 | `gracefulShutdown` | boolean                                                         | No       | Send the stop `SIGTERM` to only the main process (so it can shut down its own children) instead of the whole group. Forced `SIGKILL` still targets the group. Default `false` ([Process termination](#process-termination)) |
 | `stopTimeout`      | number                                                          | No       | Ms to wait after SIGTERM before escalating to SIGKILL for this service. Overrides the global `stopTimeout`; when unset it **inherits** the global value (which is `5000` unless you change it)                              |
+
+> **Note:** `command` is run **directly, not through a shell**. The first element is the executable and the rest are passed as literal arguments, so shell features won't work: `&&`/`;` chaining, `|` pipes, `>` redirects, glob expansion, and `$VAR` substitution are all treated as plain text. (Variables you set via `env` are passed to the process, but `$VAR` written _inside_ `command` is not expanded.) If you need shell semantics, invoke a shell explicitly, e.g. `command: ["sh", "-c", "foo && bar"]`.
 
 #### Web Links
 
@@ -232,7 +249,9 @@ Each signal is defined with:
 | `label`  | string | Yes      | Display text shown in the signal dropdown |
 | `signal` | string | Yes      | Signal name to send (e.g. `SIGHUP`)       |
 
-Signals are validated on the backend against `os.constants.signals`; an unknown signal name is ignored (and logged) rather than sent.
+Signals are validated on the backend twice: the name must be one this service **declared** in its `signals[]` (the allow-list — so a raw WebSocket client can't send a valid-but-undeclared signal the config never opted into), and it must be a real signal name (checked against `os.constants.signals`). A signal that fails either check is ignored (and logged) rather than sent.
+
+> **Note:** signals require the service to be fully `running` — not merely to have a live process. A service still in its `afterStart` (`finalizing`) phase has spawned but isn't `running` yet, so a signal is refused (the UI dropdown is likewise disabled until `running`).
 
 > **Note:** unlike stop (which signals the whole process group), a custom signal is sent only to the **launched command's main process** — by design, so e.g. a `SIGHUP` "reload config" reaches the process you configured rather than every child it forked. The consequence: if your `command` is a wrapper that doesn't forward signals (`bun run …`, `vite`, `nodemon`, a shell script), the signal hits the wrapper, not the underlying dev server. To signal the inner process, run it directly or have the wrapper forward signals.
 
@@ -252,7 +271,7 @@ Signals are validated on the backend against `os.constants.signals`; an unknown 
 
 Services can declare dependencies with `dependsOn` (an array of service `id`s). The dashboard topologically sorts services once at startup so dependencies start before the services that rely on them.
 
-- **Start All** starts services in dependency order. Because it waits for each service to be `running` before moving on, a dependent naturally starts only after its dependency is up. If a service fails, only the services that depend on it (directly or indirectly) are skipped — unrelated services keep starting, and a summary toast reports how many were skipped.
+- **Start All** starts services **sequentially** in dependency order — one service at a time, waiting for each to reach `running` before starting the next. (This is true even for services with no dependency relationship: there is no parallel startup, so a large stack starts up in series.) Because it waits for each service to be `running` before moving on, a dependent naturally starts only after its dependency is up. If a service fails, only the services that depend on it (directly or indirectly) are skipped — unrelated services later in the order keep starting, and a summary toast reports how many were skipped.
 - **Stop All** stops services sequentially in **reverse** order, so dependents shut down before the dependencies they rely on.
 - Starting a **single** service manually whose dependencies aren't running shows a non-blocking warning but still starts it — `dependsOn` is an orchestration hint, not enforced runtime wiring.
 - An unknown dependency `id` is ignored with a warning. A **self-dependency** or a dependency **cycle** is a fatal configuration error — the dashboard refuses to start (the error message includes the cycle path).
@@ -277,7 +296,7 @@ const services: UserServiceConfig[] = [
 
 #### Pre-start Hook (beforeStart)
 
-Each service can define an async `beforeStart` hook that runs **before** the process spawns — useful for waiting on a dependency's port, running a migration, or resolving secrets. While the hook runs, the service shows an `initializing` status, and "Start All" gives it the longer `beforeStartTimeout` (default 60000ms) rather than the spawn `startTimeout`; if it exceeds that, the hook is aborted and the service goes to `error`.
+Each service can define an async `beforeStart` hook that runs **before** the process spawns — useful for waiting on a dependency's port, running a migration, or resolving secrets. While the hook runs, the service shows an `initializing` status and is given the longer `beforeStartTimeout` (default 60000ms) rather than the spawn `startTimeout`; if it exceeds that, the hook is aborted and the service goes to `error`. (This timeout applies to every start — a manual single-service start, a restart, and "Start All".)
 
 The hook receives a `BeforeStartContext`:
 
@@ -330,17 +349,17 @@ Each service can define an async `afterStart` hook that runs **after** the proce
 
 The hook receives an `AfterStartContext`:
 
-| Property   | Type                   | Description                                                                                     |
-| ---------- | ---------------------- | ----------------------------------------------------------------------------------------------- |
-| `env`      | Record<string, string> | The env the process was spawned with                                                            |
-| `pid`      | number \| undefined    | The spawned process's pid                                                                       |
-| `webLinks` | WebLink[]              | The current live web links (what a `beforeStart` returned this run, or the configured baseline) |
-| `log`      | (line: string) => void | Writes a line to the service's log stream                                                       |
-| `signal`   | AbortSignal            | Aborts if the service is stopped while the hook is still running                                |
+| Property   | Type                   | Description                                                                                                                                                                                                  |
+| ---------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `env`      | Record<string, string> | The env the process was spawned with                                                                                                                                                                         |
+| `pid`      | number \| undefined    | The spawned process's pid                                                                                                                                                                                    |
+| `webLinks` | WebLink[]              | The current live web links (what a `beforeStart` returned this run, or the configured baseline)                                                                                                              |
+| `log`      | (line: string) => void | Writes a line to the service's log stream                                                                                                                                                                    |
+| `signal`   | AbortSignal            | Aborts if the service is stopped while the hook runs, **or** if the process exits/crashes on its own under it — so a readiness check polling the process (`await waitForPort(port, { signal })`) can give up |
 
 The hook may return `{ webLinks? }` to replace the service's web links (pushed live to the dashboard) — handy when a link is only knowable _after_ the process is up (a tunnel URL, a port printed to stdout). Return nothing to leave them unchanged (and `[]` clears them). The context's `webLinks` is the current live set (including anything a `beforeStart` added this run), so returning `[...webLinks, x]` extends them; returning a fresh array discards them. Links are rebuilt from the configured baseline on every (re)start (so this stays idempotent), and revert to the baseline when the service stops, crashes, or errors — a dynamically-computed link (a tunnel URL, a chosen port) doesn't linger on a dead service.
 
-If the hook **throws**, the just-started process is torn back down (it's already live and may be holding ports) and the service ends in the `error` state — so a failed migration/readiness check acts like a failed startup, and "Start All" skips the service's dependents. If the user stops the service mid-hook, `signal` is aborted, the process is terminated, and the service goes to `stopped`. During "Start All", a hook that runs longer than `afterStartTimeout` (default 60000ms) is treated the same as a failure: it's aborted, the process is torn down, and the service goes to `error`.
+If the hook **throws**, the just-started process is torn back down (it's already live and may be holding ports) and the service ends in the `error` state — so a failed migration/readiness check acts like a failed startup, and "Start All" skips the service's dependents. If the user stops the service mid-hook, `signal` is aborted, the process is terminated, and the service goes to `stopped`. `signal` is **also** aborted if the spawned process exits or crashes on its own while the hook is still running, so a readiness check polling that process can give up rather than hang; the service then settles on whatever state the exit produced (and a hook that throws in response to the abort is still treated as a failed start — `error`). A hook that runs longer than `afterStartTimeout` (default 60000ms) is treated the same as a failure: it's aborted, the process is torn down, and the service goes to `error`. (This timeout applies to every start — a manual single-service start, a restart, and "Start All".)
 
 > **`beforeStart` vs `afterStart`:** `beforeStart` runs _before_ the process exists (prepare env, resolve secrets, gate on a dependency); `afterStart` runs _after_ it's spawned (verify it's actually ready, run a post-launch step). Throwing from either fails the startup.
 
@@ -379,7 +398,7 @@ Dev Services Dashboard supports pluggable logging to integrate with your existin
 
 #### No Logging by Default
 
-By default, Dev Services Dashboard doesn't log anything unless you provide a logger:
+By default, Dev Services Dashboard doesn't log anything unless you provide a logger. Note that some non-fatal diagnostics are emitted **only** through this logger — for example an unknown `dependsOn` id being dropped, or a refused signal — so they are silent unless you configure a `logger`. (A few user-facing notices, like a refused custom signal, are also written to the affected service's log stream and so still appear in the UI regardless.)
 
 ```typescript
 import { startDevServicesDashboard } from "dev-services-dashboard";
@@ -588,6 +607,8 @@ The Dev Services Dashboard consists of:
 - WebSocket communication powered by the `ws` library
 - A web interface that communicates with the server via WebSockets
 - Real-time log streaming from services to the UI
+
+On load, the web interface fetches its initial config (dashboard name and the service list) over HTTP from `/api/services-config`; all live state — status changes, logs, link updates, and Start All / Stop All progress — then flows over the WebSocket. If you're reading frames off the exposed `wsServer` yourself, note that the server also emits an `error_from_server` message (part of the exported `ServerMessage` union) in response to a malformed or unrecognized client frame.
 
 ## Future Goals
 

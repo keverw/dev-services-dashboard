@@ -123,6 +123,7 @@ import {
   ServiceManager,
   parsePsOutput,
   collectDescendants,
+  stripAnsi,
 } from "./service-manager";
 import { Logger } from "./logger";
 import type { UserServiceConfig } from "./types";
@@ -395,8 +396,12 @@ describe("ServiceManager — core behavior", () => {
 // --- Custom signals ---------------------------------------------------------
 
 describe("ServiceManager — sendSignal", () => {
-  it("sends the signal to a running process", async () => {
-    const { sm } = makeManager([svc("a")]);
+  // A service that declares SIGHUP in its allow-list.
+  const sigHupSvc = (id: string) =>
+    svc(id, { signals: [{ label: "Reload", signal: "SIGHUP" }] });
+
+  it("sends a declared signal to a running process", async () => {
+    const { sm } = makeManager([sigHupSvc("a")]);
     await startAndRun(sm, "a");
     sm.sendSignal("a", "SIGHUP");
     expect(killLog).toEqual([{ cmd: "a", signal: "SIGHUP" }]);
@@ -404,14 +409,28 @@ describe("ServiceManager — sendSignal", () => {
   });
 
   it("is a no-op when the service is not running", () => {
-    const { sm, logs } = makeManager([svc("a")]);
+    const { sm, logs } = makeManager([sigHupSvc("a")]);
     sm.sendSignal("a", "SIGHUP");
     expect(killLog).toHaveLength(0);
     expect(warnings(logs).some((m) => m.includes("Cannot send"))).toBe(true);
   });
 
+  it("refuses a signal the service didn't declare", async () => {
+    const { sm, logs } = makeManager([sigHupSvc("a")]);
+    await startAndRun(sm, "a");
+    // SIGUSR1 is a perfectly valid OS signal, but it isn't in signals[].
+    sm.sendSignal("a", "SIGUSR1");
+    expect(killLog).toHaveLength(0);
+    expect(warnings(logs).some((m) => m.includes("undeclared signal"))).toBe(
+      true,
+    );
+  });
+
   it("rejects unknown signal strings", async () => {
-    const { sm, logs } = makeManager([svc("a")]);
+    // Declared (so it passes the allow-list) but not a real OS signal name.
+    const { sm, logs } = makeManager([
+      svc("a", { signals: [{ label: "Bogus", signal: "NOT_A_SIGNAL" }] }),
+    ]);
     await startAndRun(sm, "a");
     sm.sendSignal("a", "NOT_A_SIGNAL");
     expect(killLog).toHaveLength(0);
@@ -551,6 +570,38 @@ describe("ServiceManager — startAllServices", () => {
     const second = sm.startAllServices(); // should be a no-op while first runs
     await Promise.all([first, second]);
     expect(sm.getService("a")?.status).toBe("running");
+  });
+});
+
+// --- startAndWait dedup -----------------------------------------------------
+
+describe("ServiceManager — startAndWait dedup", () => {
+  it("dedupes concurrent starts so an orphaned timer can't tear down a running service", async () => {
+    const { sm } = makeManager([svc("a")]);
+
+    // Two concurrent starts for the same service. Before the dedup fix, the
+    // second call overwrote the first's waiter in `startWaiters`, orphaning the
+    // first call's start-timeout timer — which then fired against the
+    // now-`running` service and wrongly tore it down into `error`.
+    const p1 = sm.startAndWait("a");
+    const p2 = sm.startAndWait("a");
+
+    // The second start attaches to the in-flight run rather than starting a
+    // second one (same promise, so a single waiter + single timer).
+    expect(p1).toBe(p2);
+
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1).toBe(true);
+    expect(r2).toBe(true);
+    expect(sm.getService("a")?.status).toBe("running");
+
+    // Wait past the (collapsed) start-timeout window: no orphaned timer should
+    // fire and tear the healthy running service down.
+    await new Promise((r) => setTimeout(r, 40));
+    expect(sm.getService("a")?.status).toBe("running");
+    expect(
+      spawnedProcesses.filter((p) => p.spawnArgs?.cmd === "a"),
+    ).toHaveLength(1);
   });
 });
 
@@ -1087,6 +1138,44 @@ describe("ServiceManager — afterStart hook", () => {
     expect(sm.getService("b")?.status).toBe("running");
   });
 
+  it("times out a hung afterStart on a manual single-service start (startAndWait)", async () => {
+    const { sm } = makeManager([
+      svc("a", { afterStart: () => new Promise<void>(() => {}) }), // never resolves
+    ]);
+
+    // A manual start goes through startAndWait, so the afterStart timeout
+    // applies just like during Start All — it must not park in finalizing.
+    await sm.startAndWait("a");
+
+    const a = sm.getService("a");
+    expect(a?.status).toBe("error");
+    expect(a?.errorDetails).toContain("afterStart");
+    expect(a?.process).toBeNull();
+  });
+
+  it("times out a hung beforeStart on a restart (startAndWait)", async () => {
+    let hang = false;
+    const { sm } = makeManager([
+      svc("a", {
+        beforeStart: () =>
+          hang ? new Promise<void>(() => {}) : Promise.resolve(),
+      }),
+    ]);
+
+    // First start comes up clean.
+    await startAndRun(sm, "a");
+    expect(sm.getService("a")?.status).toBe("running");
+
+    // Restart with a now-hanging beforeStart: the timeout must error it rather
+    // than leave it parked in initializing forever.
+    hang = true;
+    await sm.restartService("a");
+
+    const a = sm.getService("a");
+    expect(a?.status).toBe("error");
+    expect(a?.errorDetails).toContain("beforeStart");
+  });
+
   it("Start All waits for afterStart before starting a dependent", async () => {
     const order: string[] = [];
     let releaseA!: () => void;
@@ -1172,5 +1261,40 @@ describe("collectDescendants", () => {
       [2, [1]],
     ]);
     expect(collectDescendants(1, cyclic).sort((a, b) => a - b)).toEqual([1, 2]);
+  });
+});
+
+describe("stripAnsi", () => {
+  const ESC = "\x1b";
+  const BEL = "\x07";
+
+  it("strips SGR color/style codes while keeping the text", () => {
+    expect(stripAnsi(`${ESC}[31mred${ESC}[0m`)).toBe("red");
+    expect(stripAnsi(`${ESC}[1;32mbold green${ESC}[0m`)).toBe("bold green");
+    // 256-color / truecolor params (semicolon-separated) are SGR too.
+    expect(stripAnsi(`${ESC}[38;5;208morange${ESC}[39m`)).toBe("orange");
+  });
+
+  it("strips cursor-move and erase (clear-line / clear-screen) codes", () => {
+    // Carriage-return progress-spinner pattern: move to col, erase line.
+    expect(stripAnsi(`\r${ESC}[2K${ESC}[1G50%`)).toBe("\r50%");
+    expect(stripAnsi(`${ESC}[2J${ESC}[Hcleared`)).toBe("cleared");
+    expect(stripAnsi(`up${ESC}[3Aover`)).toBe("upover");
+  });
+
+  it("strips OSC sequences (e.g. window-title sets)", () => {
+    expect(stripAnsi(`${ESC}]0;my title${BEL}done`)).toBe("done");
+    // OSC terminated by ST (ESC \) instead of BEL.
+    expect(stripAnsi(`${ESC}]2;title${ESC}\\after`)).toBe("after");
+  });
+
+  it("leaves text that merely looks like a code untouched", () => {
+    expect(stripAnsi("arr[0m] and [1;32m")).toBe("arr[0m] and [1;32m");
+    expect(stripAnsi("no escapes here")).toBe("no escapes here");
+    expect(stripAnsi("")).toBe("");
+  });
+
+  it("strips multiple sequences in one line", () => {
+    expect(stripAnsi(`${ESC}[31ma${ESC}[0m${ESC}[2Kb${ESC}[1Gc`)).toBe("abc");
   });
 });

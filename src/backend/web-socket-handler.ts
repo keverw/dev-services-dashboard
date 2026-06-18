@@ -83,7 +83,10 @@ export class WebSocketHandler {
 
     switch (action) {
       case "start":
-        await this.serviceManager.startService(serviceID);
+        // Use the timeout-aware start path (same as Start All) so a hung
+        // beforeStart/afterStart can't park the service in
+        // initializing/finalizing forever.
+        await this.serviceManager.startAndWait(serviceID);
         break;
       case "stop":
         await this.serviceManager.stopService(serviceID);

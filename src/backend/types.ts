@@ -1,24 +1,14 @@
 import { ChildProcess } from "child_process";
 import { type Server as HttpServer } from "http";
 import { WebSocketServer } from "ws";
-// These backend types build on the shared wire protocol. We also re-export the
-// wire types so they're part of the published package's public surface (via
-// `export * from "./types"` in index.ts) — internal modules import them from
-// "@shared/protocol" directly. They aren't needed for the documented API, but
-// let a consumer reading raw messages off `DevUIServer.wsServer` (the raw `ws`
-// server) type those messages, and they'll back the planned headless mode.
+// These backend types build on the shared wire protocol; we import the wire
+// types we need internally. Nothing is re-exported from here — the package's
+// public type surface is defined explicitly in index.ts.
 import type {
   LogEntry,
   WebLink,
   ServiceSignal,
   ServiceStatusValue,
-} from "@shared/protocol";
-
-export type { LogEntry, WebLink, ServiceSignal, ServiceStatusValue };
-export type {
-  ServerMessage,
-  ClientMessage,
-  InitialStateService,
 } from "@shared/protocol";
 
 /**
@@ -180,22 +170,24 @@ export interface DevUIConfig {
    */
   stopTimeout?: number;
   /**
-   * How long (ms) "Start All" waits for a service to report `running` after it
-   * begins spawning before treating it as timed out. Default: 10000.
+   * How long (ms) a start waits for a service to report `running` after it
+   * begins spawning before treating it as timed out. Applies to every start
+   * (manual single-service start, restart, and "Start All"). Default: 10000.
    */
   startTimeout?: number;
   /**
-   * How long (ms) "Start All" waits during a service's `beforeStart`
+   * How long (ms) a start waits during a service's `beforeStart`
    * (`initializing`) phase before treating it as a failed start: the hook is
-   * aborted and the service is put into `error` (its dependents are skipped).
-   * Default: 60000.
+   * aborted and the service is put into `error` (during "Start All" its
+   * dependents are then skipped). Applies to every start. Default: 60000.
    */
   beforeStartTimeout?: number;
   /**
-   * How long (ms) "Start All" waits during a service's `afterStart`
+   * How long (ms) a start waits during a service's `afterStart`
    * (`finalizing`) phase before treating it as a failed start: the hook is
    * aborted, the started process is torn down, and the service is put into
-   * `error` (its dependents are skipped). Default: 60000.
+   * `error` (during "Start All" its dependents are then skipped). Applies to
+   * every start. Default: 60000.
    */
   afterStartTimeout?: number;
   services: UserServiceConfig[];

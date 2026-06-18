@@ -5,6 +5,28 @@ import type { LogEntry, ServerMessage } from "@shared/protocol";
 import { Logger } from "./logger";
 
 /**
+ * Strips ANSI escape sequences from a log line. The UI renders logs as plain
+ * text, so any escape sequence is just noise (or, for cursor moves / erases,
+ * visible garbage). Covers:
+ *   - CSI sequences (`ESC [ … <final byte>`) — this is SGR color/style **and**
+ *     cursor moves, clear-line / clear-screen, etc. (e.g. progress spinners).
+ *   - OSC sequences (`ESC ] … BEL` or `ESC ] … ESC \`) — e.g. window-title sets.
+ * Requiring the leading ESC (`\x1b`) means we consume whole sequences and never
+ * clobber legitimate text that merely looks like a code (e.g. "arr[0m]").
+ * Exported for testing.
+ */
+export function stripAnsi(input: string): string {
+  // OSC: ESC ] … terminated by BEL (\x07) or ST (ESC \). CSI: ESC [ then
+  // parameter bytes (0x30–0x3F), intermediate bytes (0x20–0x2F), and a final
+  // byte (0x40–0x7E) — which covers SGR (`m`) along with cursor/erase codes.
+  return input.replace(
+    // eslint-disable-next-line no-control-regex
+    /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]/g,
+    "",
+  );
+}
+
+/**
  * Parses `ps -A -o pid=,ppid=` output into a parent-pid → child-pids map.
  * Exported for testing.
  */
@@ -75,6 +97,13 @@ export class ServiceManager {
   // One-shot listeners that "Start All" registers per service to be notified
   // (via broadcastStatus) when the service it's waiting on changes status.
   private startWaiters = new Map<string, (status: Service["status"]) => void>();
+  // In-flight `startAndWait` runs, keyed by serviceID. A second concurrent
+  // start of the same service attaches to the existing run's promise rather
+  // than spawning a second waiter+timer (only one waiter can live in
+  // `startWaiters` per service, so two runs would orphan the first's timer —
+  // which could later fire `failStartOnTimeout` against an already-`running`
+  // service and wrongly tear it down).
+  private inFlightStarts = new Map<string, Promise<boolean>>();
   private startAllInProgress = false;
 
   constructor(
@@ -205,12 +234,9 @@ export class ServiceManager {
     const service = this.getService(serviceID);
     if (!service) return;
 
-    // Strip ANSI SGR (color/style) escape codes — the UI renders logs as plain
-    // text, so they'd just be noise. Requiring the leading ESC (\x1b) means we
-    // consume the whole sequence and don't clobber legitimate text that merely
-    // looks like a code (e.g. "arr[0m]").
-    // eslint-disable-next-line no-control-regex
-    const line = originalLine.replace(/\x1b\[[0-9;]*m/g, "");
+    // Strip ANSI escape sequences — the UI renders logs as plain text, so
+    // they'd just be noise (see stripAnsi for what's covered).
+    const line = stripAnsi(originalLine);
 
     const logEntry: LogEntry = { timestamp: Date.now(), line, logType };
     service.logs.push(logEntry);
@@ -623,9 +649,12 @@ export class ServiceManager {
   }
 
   /**
-   * Sends an arbitrary POSIX signal to a running service process. The signal
-   * must be a known signal name (validated against `os.constants.signals`).
-   * No-op if the service is not currently running.
+   * Sends a POSIX signal to a running service process. The signal must both be
+   * declared in the service's `signals[]` config AND be a known signal name
+   * (validated against `os.constants.signals`). A signal the service didn't
+   * declare is refused even if it's otherwise valid — `signals[]` is the
+   * allow-list, so a raw WebSocket client can't send arbitrary signals the
+   * config never opted into. No-op if the service is not currently running.
    *
    * Unlike stop (which signals the whole process group), this targets ONLY the
    * launched command's main process — by design. Custom signals like `SIGHUP`
@@ -647,7 +676,24 @@ export class ServiceManager {
       return;
     }
 
-    if (!(signal in constants.signals)) {
+    // Only signals the service explicitly declared may be sent. The UI only
+    // surfaces these, but this also stops a raw WebSocket client from sending a
+    // valid-but-undeclared signal the config never opted into.
+    if (!service.signals?.some((s) => s.signal === signal)) {
+      this.logger.warn(
+        `Refusing to send undeclared signal "${signal}" to ${service.name}.`,
+      );
+      this.addLog(
+        serviceID,
+        `Refused to send undeclared signal "${signal}".`,
+        "system",
+      );
+      return;
+    }
+
+    // Use hasOwnProperty (not `in`) so inherited Object.prototype names like
+    // "toString"/"constructor" don't pass as valid signals.
+    if (!Object.prototype.hasOwnProperty.call(constants.signals, signal)) {
       this.logger.warn(
         `Refusing to send unknown signal "${signal}" to ${service.name}.`,
       );
@@ -949,7 +995,9 @@ export class ServiceManager {
       // new process doesn't immediately hit EADDRINUSE on a fast restart.
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    await this.startService(serviceID);
+    // Use the timeout-aware path so a hung beforeStart/afterStart on restart
+    // can't leave the service stuck in initializing/finalizing forever.
+    await this.startAndWait(serviceID);
   }
 
   clearServiceLogs(serviceID: string) {
@@ -1088,8 +1136,35 @@ export class ServiceManager {
    * three windows: `beforeStartTimeout` while `initializing`, `startTimeout`
    * while `starting`, `afterStartTimeout` while `finalizing`. A window elapsing
    * is a hard deadline — see `failStartOnTimeout`.
+   *
+   * This is the timeout-aware start entry used for every user-facing start —
+   * "Start All", a manual single-service start, and restart — so a hung hook
+   * can never leave a service parked in `initializing`/`finalizing` forever.
+   * (The raw `startService` primitive it drives has no timeout of its own.)
+   *
+   * Concurrent calls for the same service are deduped onto a single run: a
+   * second start while one is already in flight (e.g. repeated manual starts,
+   * or a manual start racing "Start All") returns the existing promise instead
+   * of arming a second timer. See `inFlightStarts`.
    */
-  private startAndWait(serviceID: string): Promise<boolean> {
+  startAndWait(serviceID: string): Promise<boolean> {
+    const existing = this.inFlightStarts.get(serviceID);
+    if (existing) return existing;
+
+    const run = this.runStartAndWait(serviceID);
+    this.inFlightStarts.set(serviceID, run);
+    // Drop the in-flight entry once it settles, but only if it's still ours (a
+    // later run may have replaced it after this one resolved).
+    void run.finally(() => {
+      if (this.inFlightStarts.get(serviceID) === run) {
+        this.inFlightStarts.delete(serviceID);
+      }
+    });
+
+    return run;
+  }
+
+  private runStartAndWait(serviceID: string): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | undefined;

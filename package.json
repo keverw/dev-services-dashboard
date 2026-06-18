@@ -44,6 +44,9 @@
   ],
   "author": "Kevin Whitman (https://github.com/keverw)",
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/keverw/dev-services-dashboard"
@@ -63,6 +66,7 @@
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "get-port": "^7.1.0",
     "markdown-toc-gen": "^1.2.0",
     "prettier": "^3.5.3",
     "react": "^18.2.0",
@@ -72,7 +76,6 @@
     "vite": "^8.0.16"
   },
   "dependencies": {
-    "get-port": "^7.1.0",
     "mime-types": "^3.0.1",
     "ws": "^8.21.0"
   },
