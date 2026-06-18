@@ -697,6 +697,13 @@ export class ServiceManager {
       this.logger.warn(
         `Cannot send ${signal} to ${service.name}: service is ${service.status}.`,
       );
+      
+      this.addLog(
+        serviceID,
+        `Refused to send "${signal}": service is ${service.status}, not running.`,
+        "system",
+      );
+      
       return;
     }
 

@@ -242,7 +242,7 @@ Web links appear as clickable buttons in each service's control panel. Each web 
 
 #### Custom Signals
 
-Services can declare custom POSIX signals you can send to the running process from the dashboard, which is handy for reloading config (`SIGHUP`), rotating logs, or triggering app-specific behavior (`SIGUSR1` / `SIGUSR2`). When the service is running, a **"Send signal…"** dropdown appears in its control bar. It's disabled when the service isn't running.
+Services can declare custom POSIX signals you can send to the running process from the dashboard, which is handy for reloading config (`SIGHUP`), rotating logs, or triggering app-specific behavior (`SIGUSR1` / `SIGUSR2`). A **"Send signal…"** dropdown is shown in the service's control bar whenever it declares any `signals`, but it's only enabled while the service is `running` and connected. It is disabled when the service isn't running or the dashboard has lost its connection to the server.
 
 Each signal is defined with:
 
@@ -385,6 +385,8 @@ If the hook **throws**, the just-started process is torn back down (it's already
 #### Process Termination
 
 Stopping a service sends `SIGTERM`, then escalates to `SIGKILL` if it hasn't exited within the stop timeout (default 5000ms, configurable globally via `stopTimeout` or per service via `stopTimeout`).
+
+> **Note:** **Restart** stops the service (only when a process is actually running, when restarting an already `stopped`/`error`/`crashed` service just starts it) and then waits a brief fixed settle pause (500ms) before starting it again, giving the OS time to release the old process's resources (e.g. its listening port) so the fresh process doesn't immediately hit `EADDRINUSE` on a fast restart.
 
 On POSIX, services are spawned **detached** so each leads its own process group, and (by default) stop signals the **whole group** (not just the process you launched). This matters because many dev commands are wrappers, such as `bun run`, `npm run`, `vite`, `nodemon`, or a shell script, that fork the actual server as a child. Signaling only the wrapper can leave that child alive holding its port, so the next start fails with `EADDRINUSE`. Group termination reaps the wrapper and its children together.
 
@@ -610,7 +612,7 @@ The Dev Services Dashboard consists of:
 - A web interface that communicates with the server via WebSockets
 - Real-time log streaming from services to the UI
 
-On load, the web interface fetches its initial config (dashboard name and the service list) over HTTP from `/api/services-config`. All live state, including status changes, logs, link updates, and Start All / Stop All progress, then flows over the WebSocket. If you're reading frames off the exposed `wsServer` yourself, note that the server also emits an `error_from_server` message (part of the exported `ServerMessage` union) in response to a malformed or unrecognized client frame.
+On load, the web interface fetches its initial config (dashboard name and the service list) over HTTP from `/api/services-config`. All live state, including status changes, logs, link updates, and Start All / Stop All progress, then flows over the WebSocket. If you're reading frames off the exposed `wsServer` yourself, note that the server also emits an `error_from_server` message (part of the exported `ServerMessage` union) in response to a client frame it can't act on: one that isn't valid JSON, names an unknown `serviceID`, uses an unrecognized `action`, or is a `send_signal` missing its `signal` field.
 
 ## Future Goals
 
