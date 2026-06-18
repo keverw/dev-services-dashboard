@@ -1,22 +1,23 @@
 import { ChildProcess } from "child_process";
 import { type Server as HttpServer } from "http";
 import { WebSocketServer } from "ws";
+// These backend types build on the shared wire protocol. We also re-export the
+// wire types so they're part of the published package's public surface (via
+// `export * from "./types"` in index.ts) — internal modules import them from
+// "@shared/protocol" directly.
+import type {
+  LogEntry,
+  WebLink,
+  ServiceSignal,
+  ServiceStatusValue,
+} from "@shared/protocol";
 
-export interface LogEntry {
-  timestamp: number;
-  line: string;
-  logType: "stdout" | "stderr" | "system";
-}
-
-export interface WebLink {
-  label: string;
-  url: string;
-}
-
-export interface ServiceSignal {
-  label: string;
-  signal: string;
-}
+export type { LogEntry, WebLink, ServiceSignal, ServiceStatusValue };
+export type {
+  ServerMessage,
+  ClientMessage,
+  InitialStateService,
+} from "@shared/protocol";
 
 /**
  * Context passed to a service's `beforeStart` hook. The hook runs after the
@@ -152,15 +153,7 @@ export interface Service {
   gracefulShutdown?: boolean;
   stopTimeout?: number;
   process: ChildProcess | null;
-  status:
-    | "stopped"
-    | "running"
-    | "initializing"
-    | "starting"
-    | "finalizing"
-    | "stopping"
-    | "error"
-    | "crashed";
+  status: ServiceStatusValue;
   logs: LogEntry[];
   errorDetails: string | null;
 }

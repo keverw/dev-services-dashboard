@@ -1,6 +1,7 @@
 import { spawn } from "child_process";
 import { constants } from "os";
-import { Service, UserServiceConfig, LogEntry } from "./types";
+import { Service, UserServiceConfig } from "./types";
+import type { LogEntry, ServerMessage } from "@shared/protocol";
 import { Logger } from "./logger";
 
 /**
@@ -53,7 +54,7 @@ const HOOK_ABORT_PROCESS_EXIT = "process-exited";
 export class ServiceManager {
   private services: Service[] = [];
   private maxLogLines: number;
-  private broadcastFn: (message: object) => void;
+  private broadcastFn: (message: ServerMessage) => void;
   private logger: Logger;
   // AbortControllers for services currently running their beforeStart hook.
   private abortControllers = new Map<string, AbortController>();
@@ -78,7 +79,7 @@ export class ServiceManager {
     logger: Logger,
     userServices: UserServiceConfig[],
     maxLogLines: number,
-    broadcastFn: (message: object) => void,
+    broadcastFn: (message: ServerMessage) => void,
     defaultCwd: string | undefined,
     options: {
       stopTimeout?: number;
@@ -1159,7 +1160,7 @@ export class ServiceManager {
     const progress = (
       service: Service,
       result: "starting" | "started" | "failed" | "skipped",
-      extra: Record<string, unknown> = {},
+      extra: { dependencyName?: string; errorDetails?: string | null } = {},
     ) => {
       this.broadcastFn({
         type: "start_all_progress",

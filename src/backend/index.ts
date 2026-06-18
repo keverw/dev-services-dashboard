@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { Logger } from "./logger";
 import { ServiceManager } from "./service-manager";
 import { DevUIConfig, DevUIServer } from "./types";
+import type { ServerMessage } from "@shared/protocol";
 import { HttpHandler } from "./http-handler";
 import { createServer } from "http";
 import { WebSocketHandler } from "./web-socket-handler";
@@ -21,7 +22,7 @@ export function startDevServicesDashboard(
     try {
       // Create broadcast function for WebSocket clients
       let wsServer: WebSocketServer;
-      const broadcast = (message: object) => {
+      const broadcast = (message: ServerMessage) => {
         const msgString = JSON.stringify(message);
         wsServer.clients.forEach((client) => {
           if (client.readyState === WebSocket.OPEN) {

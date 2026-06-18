@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { WebSocketMessage } from "../types";
+import type { ServerMessage } from "@shared/protocol";
 
 interface UseWebSocketOptions {
-  onMessage: (data: WebSocketMessage) => void;
+  onMessage: (data: ServerMessage) => void;
   onOpen: () => void;
   onClose: () => void;
   onError: () => void;

@@ -1,6 +1,7 @@
 import { Logger } from "./logger";
 import { ServiceManager } from "./service-manager";
 import { type WebSocket } from "ws";
+import type { ServerMessage } from "@shared/protocol";
 
 export class WebSocketHandler {
   private serviceManager: ServiceManager;
@@ -39,7 +40,7 @@ export class WebSocketHandler {
   }
 
   private sendInitialState(ws: WebSocket) {
-    const initialState = {
+    const initialState: ServerMessage = {
       type: "initial_state",
       services: this.serviceManager.getServices().map((s) => ({
         id: s.id,
@@ -112,11 +113,7 @@ export class WebSocketHandler {
   }
 
   private sendError(ws: WebSocket, message: string) {
-    ws.send(
-      JSON.stringify({
-        type: "error_from_server",
-        message,
-      }),
-    );
+    const error: ServerMessage = { type: "error_from_server", message };
+    ws.send(JSON.stringify(error));
   }
 }

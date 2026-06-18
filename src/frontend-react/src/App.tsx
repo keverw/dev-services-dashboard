@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import {
   ServiceConfig,
-  WebSocketMessage,
   AutoScrollStates,
   ServicesConfigResponse,
 } from "./types";
+import type { ServerMessage } from "@shared/protocol";
 import Header from "./components/Header";
 import TabNavigation from "./components/TabNavigation";
 import ServiceTab from "./components/ServiceTab";
@@ -138,7 +138,7 @@ function AppContent() {
     document.title = dashboardName;
   }, [dashboardName]);
 
-  function handleWebSocketMessage(data: WebSocketMessage) {
+  function handleWebSocketMessage(data: ServerMessage) {
     switch (data.type) {
       case "initial_state":
         if (data.services) {
