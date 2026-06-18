@@ -302,6 +302,8 @@ Each service can define an async `beforeStart` hook that runs **before** the pro
 
 The hook receives a `BeforeStartContext`:
 
+> **Note:** the hook context and return types, `BeforeStartContext`, `BeforeStartResult`, `AfterStartContext`, and `AfterStartResult`. These are all exported from the package (alongside `UserServiceConfig`), so you can type a hook written separately from the config literal, e.g. `const prepare = (ctx: BeforeStartContext) => { … }`.
+
 | Property   | Type                   | Description                                                        |
 | ---------- | ---------------------- | ------------------------------------------------------------------ |
 | `env`      | Record<string, string> | The merged env (process env + service `env`) bound for the process |
