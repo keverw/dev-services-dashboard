@@ -7,7 +7,7 @@
 - [0.0.3 (June 8, 2025)](#003-june-8-2025)
 - [0.0.4 (June 8, 2025)](#004-june-8-2025)
 - [0.0.5 (June 8, 2025)](#005-june-8-2025)
-- [0.1.0 (June 18, 2026)](#010-june-18-2026)
+- [1.0.0 (June 19, 2026)](#100-june-19-2026)
   - [Features](#features)
   - [UX / fixes](#ux--fixes)
   - [Tests](#tests)
@@ -47,7 +47,7 @@
   - Added consistent border styling to logs area for better visual definition
   - Improved spacing balance around logs section divider and controls for better visual hierarchy
 
-## 0.1.0 (June 18, 2026)
+## 1.0.0 (June 19, 2026)
 
 ### Features
 

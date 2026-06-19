@@ -1,4 +1,4 @@
-# Dev Services Dashboard v0.1.0
+# Dev Services Dashboard v1.0.0
 
 [![npm version](https://badge.fury.io/js/dev-services-dashboard.svg)](https://badge.fury.io/js/dev-services-dashboard)
 
@@ -722,7 +722,14 @@ The Dev Services Dashboard consists of:
 - A web interface that communicates with the server via WebSockets
 - Real-time log streaming from services to the UI
 
-On load, the web interface fetches its initial config (the dashboard name and the service list, with each service's `id`, `name`, `webLinks`, `signals`, and `dependsOn`) over HTTP from `/api/services-config`. The initial snapshot of per-service state (current `status`, buffered `logs`, and `errorDetails`) arrives over the WebSocket in the `initial_state` frame on connect, and all live updates after that, including status changes, new logs, link updates, and Start All / Stop All progress, also flow over the WebSocket. If you're reading frames off the exposed `wsServer` yourself, note that the server also emits an `error_from_server` message (part of the exported `ServerMessage` union) in response to a client frame it can't act on: one that can't be processed (e.g. isn't valid JSON), names an unknown `serviceID`, uses an unrecognized `action`, or is a `send_signal` missing its `signal` field. It also replies with `error_from_server` ("Dashboard is shutting down.") to any client frame received once `stop()` has begun.
+The web interface talks to the server over two channels:
+
+- **HTTP, once on load.** It fetches `/api/services-config` for the dashboard name and the service list (each service's `id`, `name`, `webLinks`, `signals`, and `dependsOn`). This renders the initial shell (tabs and title) and is the only place the dashboard name is sent.
+- **WebSocket, on every connect.** The server sends an `initial_state` frame with the current per-service snapshot (`status`, buffered `logs`, `errorDetails`), and everything live after that flows over the socket: status changes, new logs, link updates, and Start All / Stop All progress. Since it's resent on every (re)connect, a client that drops and reconnects re-syncs whatever changed while it was away.
+
+The `initial_state` frame is self-contained: it also carries each service's `id`, `name`, `webLinks`, `signals`, and `dependsOn` (see the exported `InitialStateService` type), so a consumer reading raw frames off the exposed `wsServer` doesn't need the HTTP endpoint at all. The HTTP/WebSocket split is just how the built-in UI happens to load.
+
+If you're consuming frames yourself, the server also emits an `error_from_server` message (part of the exported `ServerMessage` union) in response to a client frame it can't act on: one that can't be processed (e.g. isn't valid JSON), names an unknown `serviceID`, uses an unrecognized `action`, or is a `send_signal` missing its `signal` field. It also replies with `error_from_server` ("Dashboard is shutting down.") to any client frame received once `stop()` has begun.
 
 ## Future Goals
 
