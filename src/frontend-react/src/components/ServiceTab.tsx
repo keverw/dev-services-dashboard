@@ -5,6 +5,7 @@ import { useToast } from "../contexts/ToastContext";
 interface ServiceTabProps {
   service: ServiceConfig;
   isActive: boolean;
+  connected?: boolean;
   status?: { status: string; errorDetails?: string };
   connectionStatus?: { status: string; message: string };
   logs: string;
@@ -14,11 +15,13 @@ interface ServiceTabProps {
   onRestart: () => void;
   onClearLogs: () => void;
   onToggleAutoScroll: () => void;
+  onSendSignal: (signal: string) => void;
 }
 
 function ServiceTab({
   service,
   isActive,
+  connected = true,
   status,
   connectionStatus,
   logs,
@@ -28,6 +31,7 @@ function ServiceTab({
   onRestart,
   onClearLogs,
   onToggleAutoScroll,
+  onSendSignal,
 }: ServiceTabProps) {
   const logsRef = useRef<HTMLPreElement>(null);
   const { addToast } = useToast();
@@ -50,18 +54,28 @@ function ServiceTab({
   const capitalizedStatus =
     currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1);
 
+  // All process-control actions require a live server connection.
   const isStartDisabled =
+    !connected ||
     currentStatus === "running" ||
+    currentStatus === "initializing" ||
     currentStatus === "starting" ||
+    currentStatus === "finalizing" ||
     currentStatus === "stopping";
   const isStopDisabled =
+    !connected ||
     currentStatus === "stopped" ||
     currentStatus === "error" ||
     currentStatus === "crashed" ||
     currentStatus === "starting" ||
     currentStatus === "stopping";
   const isRestartDisabled =
-    currentStatus === "starting" || currentStatus === "stopping";
+    !connected ||
+    currentStatus === "initializing" ||
+    currentStatus === "starting" ||
+    currentStatus === "finalizing" ||
+    currentStatus === "stopping";
+  const isSignalDisabled = !connected || currentStatus !== "running";
 
   const createWebLinkButtons = () => {
     if (!service.webLinks || service.webLinks.length === 0) {
@@ -148,6 +162,31 @@ function ServiceTab({
           >
             Restart
           </button>
+          {service.signals && service.signals.length > 0 && (
+            <select
+              id={`${service.id}-send-signal`}
+              className="send-signal-select"
+              title={`Send a signal to ${service.name}`}
+              value=""
+              disabled={isSignalDisabled}
+              onChange={(e) => {
+                const signal = e.target.value;
+                if (signal) {
+                  onSendSignal(signal);
+                  e.target.value = "";
+                }
+              }}
+            >
+              <option value="" disabled>
+                Send signal…
+              </option>
+              {service.signals.map((s) => (
+                <option key={s.signal} value={s.signal}>
+                  {s.label} ({s.signal})
+                </option>
+              ))}
+            </select>
+          )}
           <button
             id={`${service.id}-clear-logs`}
             className="clear-logs-button"

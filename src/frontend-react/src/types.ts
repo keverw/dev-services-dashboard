@@ -1,46 +1,26 @@
+// Frontend-local view types. Wire types (the WebSocket message contract, web
+// links, signals, statuses) come from the shared protocol — import them from
+// "@shared/protocol" directly where needed. This app is bundled and embedded
+// into the backend package rather than imported as a module, so there's no
+// public type surface to re-export here (unlike the backend's types.ts).
+import type {
+  WebLink,
+  ServiceSignal,
+  ServiceStatusValue,
+} from "@shared/protocol";
+
 export interface ServiceConfig {
   id: string;
   name: string;
   webLinks?: WebLink[];
-}
-
-export interface WebLink {
-  label: string;
-  url: string;
-}
-
-export interface LogEntry {
-  line: string;
-  logType: "stdout" | "stderr" | "system";
-  timestamp: number;
+  signals?: ServiceSignal[];
+  dependsOn?: string[];
 }
 
 export interface ServiceStatus {
   id: string;
-  status: "stopped" | "running" | "starting" | "stopping" | "error" | "crashed";
+  status: ServiceStatusValue;
   errorDetails?: string;
-}
-
-export interface WebSocketMessage {
-  type:
-    | "initial_state"
-    | "log"
-    | "status_update"
-    | "logs_cleared"
-    | "error_from_server";
-  serviceID?: string;
-  services?: Array<{
-    id: string;
-    status: string;
-    errorDetails?: string;
-    logs: LogEntry[];
-  }>;
-  line?: string;
-  logType?: string;
-  timestamp?: number;
-  status?: string;
-  errorDetails?: string;
-  message?: string;
 }
 
 export interface AutoScrollStates {

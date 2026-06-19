@@ -1,16 +1,86 @@
 import { ChildProcess } from "child_process";
 import { type Server as HttpServer } from "http";
 import { WebSocketServer } from "ws";
+// These backend types build on the shared wire protocol; we import the wire
+// types we need internally. Nothing is re-exported from here — the package's
+// public type surface is defined explicitly in index.ts.
+import type {
+  LogEntry,
+  WebLink,
+  ServiceSignal,
+  ServiceStatusValue,
+} from "@shared/protocol";
 
-export interface LogEntry {
-  timestamp: number;
-  line: string;
-  logType: "stdout" | "stderr" | "system";
+/**
+ * Context passed to a service's `beforeStart` hook. The hook runs after the
+ * environment is merged but before the process is spawned.
+ */
+export interface BeforeStartContext {
+  /** Merged env (process.env + service env) that will be passed to the process. */
+  env: Record<string, string>;
+  /** The service's currently configured web links. */
+  webLinks: WebLink[];
+  /** Writes a "system" log line to the service's log stream. */
+  log: (line: string) => void;
+  /** Aborted if the user stops the service while the hook is still running. */
+  signal: AbortSignal;
 }
 
-export interface WebLink {
-  label: string;
-  url: string;
+/**
+ * What a `beforeStart` hook may return to customize the launch. Any field left
+ * out keeps its existing value.
+ */
+export interface BeforeStartResult {
+  /** Replaces the env passed to the spawned process. */
+  env?: Record<string, string>;
+  /**
+   * Replaces the service's web links (pushed live to the dashboard). Omit (or
+   * return undefined/null) to leave them unchanged; return `[]` to clear them.
+   */
+  webLinks?: WebLink[];
+}
+
+/**
+ * Context passed to a service's `afterStart` hook. The hook runs after the
+ * process has spawned but before the service is reported `running` — so it acts
+ * as a readiness/post-start gate (e.g. wait for the port to accept connections,
+ * run a DB migration). Throwing tears the just-started process back down and
+ * puts the service into the `error` state.
+ */
+export interface AfterStartContext {
+  /** The env the process was spawned with. */
+  env: Record<string, string>;
+  /** The spawned process's pid (undefined only if it vanished immediately). */
+  pid: number | undefined;
+  /**
+   * The current live web links (a copy): the links a `beforeStart` on this
+   * service returned this run, or the configured baseline if there was none.
+   * Build from these (`[...webLinks, x]`) to extend rather than discard them.
+   */
+  webLinks: WebLink[];
+  /** Writes a "system" log line to the service's log stream. */
+  log: (line: string) => void;
+  /**
+   * Aborted if the service is stopped while the hook runs, or if the process
+   * exits/crashes on its own under it — so a readiness check that polls the
+   * process (e.g. `await waitForPort(port, { signal })`) can give up. Note a
+   * hook that throws is still treated as a failed start (`error`) even when the
+   * throw was its response to this abort.
+   */
+  signal: AbortSignal;
+}
+
+/**
+ * What an `afterStart` hook may return. Any field left out keeps its value.
+ */
+export interface AfterStartResult {
+  /**
+   * Replaces the service's live web links (pushed live to the dashboard).
+   * Returning `[...webLinks, x]` (from the context's current links) keeps any
+   * a `beforeStart` already added; returning a fresh array discards them. Omit
+   * (or return undefined/null) to leave them unchanged; return `[]` to clear.
+   */
+  webLinks?: WebLink[];
 }
 
 /**
@@ -29,6 +99,32 @@ export interface UserServiceConfig {
   cwd?: string;
   env?: Record<string, string>;
   webLinks?: WebLink[];
+  signals?: ServiceSignal[];
+  dependsOn?: string[];
+  beforeStart?: (ctx: BeforeStartContext) => Promise<BeforeStartResult | void>;
+  /**
+   * Runs after the process has spawned but before the service is reported
+   * `running`. Use it as a readiness gate or post-start step (wait for a port,
+   * run a migration). Throwing tears the process back down and marks the service
+   * `error`; "Start All" waits for it to resolve before starting dependents.
+   */
+  afterStart?: (ctx: AfterStartContext) => Promise<AfterStartResult | void>;
+  /**
+   * When true, the graceful stop signal (SIGTERM) is sent to only the main
+   * process instead of the whole process group, letting the process coordinate
+   * shutting down its own children (e.g. to test graceful shutdown / signal
+   * forwarding). The forced SIGKILL still targets the whole group as a safety
+   * net so nothing is orphaned. Default: false (signal the whole group).
+   * No effect on Windows, where process groups aren't used and stop always
+   * signals just the launched process.
+   */
+  gracefulShutdown?: boolean;
+  /**
+   * How long (ms) to wait after SIGTERM before escalating to SIGKILL on stop.
+   * Overrides the global `stopTimeout`; when unset it inherits the global value
+   * (which is 5000 unless configured otherwise).
+   */
+  stopTimeout?: number;
 }
 
 export interface Service {
@@ -37,19 +133,65 @@ export interface Service {
   command: string[];
   cwd: string;
   env?: Record<string, string>;
+  /** The configured web links (immutable baseline passed to `beforeStart`). */
   webLinks?: WebLink[];
+  /**
+   * Web links set by the last `beforeStart` run, overriding `webLinks` for
+   * display. Kept separate so the hook always receives the configured baseline
+   * and additive patterns (`[...webLinks, x]`) don't accumulate across restarts.
+   */
+  liveWebLinks?: WebLink[];
+  signals?: ServiceSignal[];
+  dependsOn?: string[];
+  beforeStart?: (ctx: BeforeStartContext) => Promise<BeforeStartResult | void>;
+  afterStart?: (ctx: AfterStartContext) => Promise<AfterStartResult | void>;
+  gracefulShutdown?: boolean;
+  stopTimeout?: number;
   process: ChildProcess | null;
-  status: "stopped" | "running" | "starting" | "stopping" | "error" | "crashed";
+  status: ServiceStatusValue;
   logs: LogEntry[];
   errorDetails: string | null;
 }
 
 export interface DevUIConfig {
   port?: number;
+  /**
+   * Host/interface to bind the server to. Default: "localhost" (loopback only —
+   * reachable from this machine alone). Set to "0.0.0.0" (or a specific
+   * interface IP) to expose the dashboard on your LAN. Note: the dashboard has
+   * no authentication and can start/stop/signal processes on the host, so only
+   * bind to a non-loopback address on a trusted network.
+   */
   hostname?: string;
   maxLogLines?: number;
   defaultCwd?: string;
   dashboardName?: string;
+  /**
+   * Default time (ms) to wait after SIGTERM before escalating to SIGKILL when
+   * stopping a service. Per-service `stopTimeout` overrides this. Default: 5000.
+   */
+  stopTimeout?: number;
+  /**
+   * How long (ms) a start waits for a service to report `running` after it
+   * begins spawning before treating it as timed out. Applies to every start
+   * (manual single-service start, restart, and "Start All"). Default: 10000.
+   */
+  startTimeout?: number;
+  /**
+   * How long (ms) a start waits during a service's `beforeStart`
+   * (`initializing`) phase before treating it as a failed start: the hook is
+   * aborted and the service is put into `error` (during "Start All" its
+   * dependents are then skipped). Applies to every start. Default: 60000.
+   */
+  beforeStartTimeout?: number;
+  /**
+   * How long (ms) a start waits during a service's `afterStart`
+   * (`finalizing`) phase before treating it as a failed start: the hook is
+   * aborted, the started process is torn down, and the service is put into
+   * `error` (during "Start All" its dependents are then skipped). Applies to
+   * every start. Default: 60000.
+   */
+  afterStartTimeout?: number;
   services: UserServiceConfig[];
   logger?: DevServicesDashboardLoggerFunction;
 }

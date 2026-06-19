@@ -1,15 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { spawn } from "child_process";
-import { createServer } from "http";
-import { WebSocketServer } from "ws";
-import { readFile } from "fs/promises";
 import getPort from "get-port";
 
 // Mock dependencies
 mock.module("child_process", () => ({
   spawn: mock(() => {
     const mockProcess = {
-      on: mock((event: string, callback: Function) => {
+      on: mock((event: string, callback: (...args: unknown[]) => void) => {
         if (event === "spawn") {
           // Simulate successful spawn
           setTimeout(() => callback(), 10);
@@ -30,18 +26,12 @@ mock.module("fs/promises", () => ({
 }));
 
 // Import after mocking
-import {
-  startDevServicesDashboard,
-  type DevUIConfig,
-  type UserServiceConfig,
-} from "./index";
+import { startDevServicesDashboard, type DevUIConfig } from "./index";
 
 describe("Dev Services Dashboard", () => {
-  let mockBroadcast: ReturnType<typeof mock>;
   let testConfig: DevUIConfig;
 
   beforeEach(async () => {
-    mockBroadcast = mock();
     // Use dynamic port allocation to avoid conflicts
     const port = await getPort();
     testConfig = {
@@ -133,6 +123,37 @@ describe("Dev Services Dashboard", () => {
 
       await server.stop();
     });
+
+    it("returns 304 when the client ETag matches", async () => {
+      const server = await startDevServicesDashboard(testConfig);
+
+      // First request: grab the served ETag.
+      const first = await fetch(`http://localhost:${server.port}/`);
+      expect(first.status).toBe(200);
+      const etag = first.headers.get("etag");
+      expect(etag).toBeTruthy();
+
+      // Second request with that ETag: the VFS middleware short-circuits to 304.
+      const second = await fetch(`http://localhost:${server.port}/`, {
+        headers: { "If-None-Match": etag! },
+      });
+      expect(second.status).toBe(304);
+
+      await server.stop();
+    });
+
+    it("ignores non-GET/HEAD requests in the VFS (404 via fall-through)", async () => {
+      const server = await startDevServicesDashboard(testConfig);
+
+      // A POST isn't served from the VFS, so the request falls through to the
+      // not-found handler rather than returning the index page.
+      const response = await fetch(`http://localhost:${server.port}/`, {
+        method: "POST",
+      });
+      expect(response.status).toBe(404);
+
+      await server.stop();
+    });
   });
 
   describe("WebSocket Handler", () => {
@@ -181,6 +202,36 @@ describe("Dev Services Dashboard", () => {
       ws.close();
       await server.stop();
     });
+
+    it("broadcasts server messages to connected clients", async () => {
+      const server = await startDevServicesDashboard(testConfig);
+
+      const ws = new WebSocket(`ws://localhost:${server.port}`);
+      await new Promise((resolve) => {
+        ws.onopen = resolve;
+      });
+
+      // clear_logs triggers a `logs_cleared` broadcast to every open client —
+      // exercising the broadcast fan-out (not the direct initial_state send).
+      const cleared = await new Promise((resolve, reject) => {
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "logs_cleared") resolve(data);
+        };
+        ws.send(
+          JSON.stringify({ action: "clear_logs", serviceID: "test-service" }),
+        );
+        setTimeout(reject, 1000);
+      });
+
+      expect(cleared).toMatchObject({
+        type: "logs_cleared",
+        serviceID: "test-service",
+      });
+
+      ws.close();
+      await server.stop();
+    });
   });
 
   describe("Service Process Management", () => {
@@ -219,6 +270,65 @@ describe("Dev Services Dashboard", () => {
         type: "error_from_server",
         message: expect.stringContaining("Invalid serviceID"),
       });
+
+      ws.close();
+      await server.stop();
+    });
+
+    it("should reject send_signal without a signal", async () => {
+      const server = await startDevServicesDashboard(testConfig);
+
+      const ws = new WebSocket(`ws://localhost:${server.port}`);
+      await new Promise((resolve) => {
+        ws.onopen = resolve;
+      });
+
+      ws.send(
+        JSON.stringify({ action: "send_signal", serviceID: "test-service" }),
+      );
+
+      const errorResponse = await new Promise((resolve, reject) => {
+        let messageCount = 0;
+        ws.onmessage = (event) => {
+          messageCount++;
+          const data = JSON.parse(event.data);
+          if (data.type === "error_from_server" && messageCount > 1) {
+            resolve(data);
+          }
+        };
+        setTimeout(reject, 1000);
+      });
+
+      expect(errorResponse).toMatchObject({
+        type: "error_from_server",
+        message: expect.stringContaining("send_signal requires a signal"),
+      });
+
+      ws.close();
+      await server.stop();
+    });
+
+    it("should handle stop_all without error when nothing is running", async () => {
+      const server = await startDevServicesDashboard(testConfig);
+
+      const ws = new WebSocket(`ws://localhost:${server.port}`);
+      await new Promise((resolve) => {
+        ws.onopen = resolve;
+      });
+
+      ws.send(JSON.stringify({ action: "stop_all" }));
+
+      // No services are running, so stop_all should complete silently — assert
+      // we don't get an error_from_server back.
+      const sawError = await new Promise((resolve) => {
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "error_from_server") resolve(true);
+        };
+        setTimeout(() => resolve(false), 300);
+      });
+
+      expect(sawError).toBe(false);
 
       ws.close();
       await server.stop();
@@ -314,27 +424,80 @@ describe("Dev Services Dashboard", () => {
 
       await server.stop();
     });
+
+    it("trims a custom dashboard name and falls back when blank", async () => {
+      const port = await getPort();
+      const customConfig: DevUIConfig = {
+        port,
+        dashboardName: "   ",
+        services: [
+          {
+            id: "test",
+            name: "Test Service",
+            command: ["echo", "test"],
+          },
+        ],
+      };
+
+      const server = await startDevServicesDashboard(customConfig);
+
+      const response = await fetch(
+        `http://localhost:${server.port}/api/services-config`,
+      );
+      const data = await response.json();
+
+      // A whitespace-only name falls back to the default rather than rendering
+      // an empty title.
+      expect(data).toMatchObject({
+        dashboardName: "Dev Services Dashboard",
+      });
+
+      await server.stop();
+    });
   });
 
   describe("Error Handling", () => {
-    it("should handle server startup errors gracefully", async () => {
-      // Test that the server can handle configuration errors
+    it("rejects startup on invalid service config", async () => {
+      // An empty command can't be spawned, so the dashboard rejects the start
+      // rather than booting with an unusable service.
       const port = await getPort();
       const invalidConfig: DevUIConfig = {
         port,
         services: [
           {
-            id: "", // Invalid empty ID
+            id: "broken",
             name: "Invalid Service",
             command: [],
           },
         ],
       };
 
-      // Server should still start even with invalid service config
-      const server = await startDevServicesDashboard(invalidConfig);
-      expect(server).toBeDefined();
-      await server.stop();
+      await expect(startDevServicesDashboard(invalidConfig)).rejects.toThrow(
+        /empty or invalid command/,
+      );
+    });
+
+    it("rejects when the server fails to bind", async () => {
+      // Binding to an address that isn't a local interface fails asynchronously
+      // with EADDRNOTAVAIL, which the `listen` error handler turns into a
+      // rejected start (covers the failed-bind path). A same-port collision
+      // can't be used here: Bun enables SO_REUSEPORT, so two listeners on one
+      // port both bind successfully.
+      const port = await getPort();
+
+      let rejected = false;
+      try {
+        const server = await startDevServicesDashboard({
+          ...testConfig,
+          port,
+          hostname: "192.0.2.1", // TEST-NET-1: routable syntax, not a local NIC
+        });
+        await server.stop(); // unexpected: clean up if it somehow bound
+      } catch {
+        rejected = true;
+      }
+
+      expect(rejected).toBe(true);
     });
 
     it("should handle malformed WebSocket messages", async () => {

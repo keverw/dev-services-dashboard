@@ -1,12 +1,86 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Class-based dark mode: the `dark:` variant activates for any element under
+   an ancestor carrying the `dark` class (ThemeContext toggles it on <html>).
+   Written as a descendant selector rather than `&:where(.dark, .dark *)` so it
+   stays valid when applied to ::before/::after pseudo-elements. */
+@custom-variant dark (.dark &);
+
+/* Design tokens, ported from the former tailwind.config.js. In v4 these live
+   in CSS and are exposed as both utilities (bg-primary-500) and variables
+   (var(--color-primary-500)). */
+@theme {
+  --color-primary-50: #ebf8ff;
+  --color-primary-100: #bee3f8;
+  --color-primary-200: #90cdf4;
+  --color-primary-300: #63b3ed;
+  --color-primary-400: #4299e1;
+  --color-primary-500: #3182ce; /* #3498db equivalent */
+  --color-primary-600: #2b77cb;
+  --color-primary-700: #2c5aa0;
+  --color-primary-800: #2a4365;
+  --color-primary-900: #1a365d;
+
+  --color-secondary-50: #f7fafc;
+  --color-secondary-100: #edf2f7;
+  --color-secondary-200: #e2e8f0;
+  --color-secondary-300: #cbd5e0;
+  --color-secondary-400: #a0aec0;
+  --color-secondary-500: #718096;
+  --color-secondary-600: #4a5568;
+  --color-secondary-700: #2d3748;
+  --color-secondary-800: #2c3e50; /* Original dark blue color */
+  --color-secondary-900: #1a202c;
+
+  --color-success-400: #48bb78;
+  --color-success-500: #38a169; /* #2ecc71 equivalent */
+  --color-success-600: #2f855a;
+
+  --color-warning-400: #ed8936;
+  --color-warning-500: #dd6b20; /* #f39c12 equivalent */
+  --color-warning-600: #c05621;
+
+  --color-error-400: #fc8181;
+  --color-error-500: #e53e3e; /* #e74c3c equivalent */
+  --color-error-600: #c53030;
+
+  --color-gray-50: #f7fafc;
+  --color-gray-100: #edf2f7;
+  --color-gray-200: #e2e8f0;
+  --color-gray-300: #cbd5e0;
+  --color-gray-400: #a0aec0;
+  --color-gray-500: #718096;
+  --color-gray-600: #4a5568;
+  --color-gray-700: #2d3748;
+  --color-gray-750: #1f2937; /* Custom shade between 700 and 800 for tab differentiation */
+  --color-gray-800: #1a202c;
+  --color-gray-900: #171923;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-mono: "Menlo", "Consolas", monospace;
+}
 
 /* Universal box-sizing reset */
 *,
 *:before,
 *:after {
   @apply box-border;
+}
+
+/* Smooth color fade when switching light/dark themes. Gated behind
+   .theme-transitions (added by ThemeProvider after the first paint) so the
+   initial theme on page load snaps in instead of animating. Only color-ish
+   properties transition, so transform/opacity animations (toasts, pulses)
+   are untouched. */
+html.theme-transitions,
+html.theme-transitions *,
+html.theme-transitions *::before,
+html.theme-transitions *::after {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 0.25s;
+  transition-timing-function: ease;
 }
 
 body {
@@ -20,15 +94,15 @@ body {
 
 /* Custom focus styles for buttons */
 .tab-button:focus {
-  @apply outline-none shadow-[0_0_0_2px_theme(colors.primary.500)] border-transparent z-[2];
+  @apply outline-none shadow-[0_0_0_2px_var(--color-primary-500)] border-transparent z-[2];
 }
 
 .controls button:focus {
-  @apply outline-none shadow-[0_0_0_2px_theme(colors.primary.500)] relative z-[2];
+  @apply outline-none shadow-[0_0_0_2px_var(--color-primary-500)] relative z-[2];
 }
 
 .global-controls button:focus {
-  @apply outline-none shadow-[0_0_0_2px_theme(colors.primary.500)] relative z-[2];
+  @apply outline-none shadow-[0_0_0_2px_var(--color-primary-500)] relative z-[2];
 }
 
 header {
@@ -80,6 +154,31 @@ header {
   @apply cursor-not-allowed bg-gray-400;
 }
 
+.overview-header-btn {
+  @apply cursor-pointer whitespace-nowrap rounded border border-gray-300 dark:border-gray-500 bg-transparent px-3 py-1.5 text-sm font-medium text-white transition-colors;
+}
+
+.overview-header-btn:hover {
+  @apply bg-white/10;
+}
+
+.overview-header-btn.active {
+  @apply bg-white/20 border-white/60;
+}
+
+.stop-all-header-btn {
+  @apply cursor-pointer whitespace-nowrap rounded border-none bg-error-500 px-3 py-1.5 text-sm font-medium text-white transition-colors;
+  position: relative;
+}
+
+.stop-all-header-btn:hover {
+  @apply bg-error-600;
+}
+
+.stop-all-header-btn:disabled {
+  @apply cursor-not-allowed bg-gray-400;
+}
+
 /* Toast Notification System */
 .toast-container {
   @apply fixed z-[1000] flex flex-col gap-3;
@@ -90,22 +189,36 @@ header {
 }
 
 .toast-item {
-  @apply flex items-center gap-3 rounded-lg shadow-lg px-4 py-3 min-w-[320px] max-w-[420px];
+  /* Fixed width so a toast doesn't resize as its text length changes (e.g. a
+     live progress toast counting up, then morphing into a summary). */
+  @apply flex items-center gap-3 rounded-lg shadow-lg px-4 py-3 w-[360px];
   background: white;
   border-left: 4px solid;
   font-size: 14px;
   line-height: 1.4;
   pointer-events: auto; /* Re-enable clicks on individual toasts */
   transform-origin: top right;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Only transition color-ish properties (e.g. a progress toast morphing from
+     info→success). Transform/opacity/size are driven entirely by the keyframe
+     animations below; transitioning them too makes the two fight and flicker. */
+  transition-property: background-color, border-color, color;
+  transition-duration: 0.3s;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .toast-enter {
   animation: toastSlideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Apply the keyframe's off-screen "from" state immediately on mount so the
+     toast never flashes at rest before sliding in. */
+  animation-fill-mode: backwards;
 }
 
 .toast-exit {
   animation: toastSlideOut 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Hold the final (hidden) frame until React unmounts the toast. Without this
+     the toast snaps back to its resting visible state for the frame or two
+     between the animation ending and unmount — the dismiss "flicker". */
+  animation-fill-mode: forwards;
 }
 
 .toast-icon {
@@ -384,7 +497,7 @@ header {
 }
 
 .tab-content {
-  @apply hidden bg-white dark:bg-gray-800 rounded-lg shadow-lg px-7 py-7 overflow-hidden w-full flex-1 min-h-500 mb-4;
+  @apply hidden bg-white dark:bg-gray-800 rounded-lg shadow-lg px-7 py-7 overflow-hidden w-full flex-1 min-h-[500px] mb-4;
 }
 
 .tab-content.active {
@@ -401,11 +514,11 @@ header {
 }
 
 .logs-container {
-  @apply flex flex-col flex-grow-0 min-h-300 h-auto;
+  @apply flex flex-col flex-grow-0 min-h-[300px] h-auto;
 }
 
 .logs-area {
-  @apply bg-secondary-800 text-gray-100 font-mono text-sm px-6 py-6 rounded-xl border border-gray-300 dark:border-gray-600 overflow-x-auto whitespace-pre-wrap break-all min-h-300 max-h-500 h-500 overflow-y-auto flex-grow-0;
+  @apply bg-secondary-800 text-gray-100 font-mono text-sm px-6 py-6 rounded-xl border border-gray-300 dark:border-gray-600 overflow-x-auto whitespace-pre-wrap break-all min-h-[300px] max-h-[500px] h-[500px] overflow-y-auto flex-grow-0;
 }
 
 .service-title {
@@ -426,7 +539,9 @@ header {
 .status-running {
   @apply bg-success-500;
 }
-.status-starting {
+.status-initializing,
+.status-starting,
+.status-finalizing {
   @apply bg-warning-500 animate-pulse;
 }
 .status-stopping {
@@ -461,7 +576,14 @@ header {
 }
 
 .controls button[id$="-weblink-0"]::before {
-  @apply content-[''] absolute -left-3 top-1/2 -translate-y-1/2 h-7 w-0.5 bg-gray-300 dark:bg-gray-600;
+  @apply content-[''] absolute -left-3 top-1/2 -translate-y-1/2 h-7 w-0.5 bg-gray-300;
+}
+
+/* Dark override written as its own rule: the `dark:` variant can't be @apply'd
+   directly onto a ::before (Tailwind wraps the selector in :is(), which can't
+   hold a pseudo-element). */
+.dark .controls button[id$="-weblink-0"]::before {
+  @apply bg-gray-600;
 }
 
 /* Mobile adjustments for controls */
@@ -492,7 +614,12 @@ header {
 }
 
 .logs-header-divider::before {
-  @apply content-[''] absolute left-0 top-1/2 h-px bg-gray-300 dark:bg-gray-600 w-full;
+  @apply content-[''] absolute left-0 top-1/2 h-px bg-gray-300 w-full;
+}
+
+/* Dark override as its own rule (see note above re: ::before + dark:). */
+.dark .logs-header-divider::before {
+  @apply bg-gray-600;
 }
 
 .logs-header-divider h3 {
@@ -564,6 +691,71 @@ header {
 }
 .controls button.clear-logs-button:hover {
   @apply bg-gray-600;
+}
+
+/* Gentle fade-in for the UI that appears once services finish loading
+   (header controls, tabs, and the main content) so it doesn't pop in.
+   Pure opacity — no movement — so it eases in rather than dropping in. */
+@keyframes uiFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.header-controls {
+  animation: uiFadeIn 0.4s ease both;
+}
+
+.tab-button {
+  animation: uiFadeIn 0.5s ease both;
+}
+
+/* Slight delay so the content settles in just after the chrome — a subtle
+   cascade rather than everything at the same instant. */
+.tab-content-container.loaded {
+  animation: uiFadeIn 0.5s ease 0.1s both;
+}
+
+/* Service overview grid */
+.overview {
+  @apply p-4;
+}
+
+.overview-title {
+  @apply text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100;
+}
+
+.overview-grid {
+  @apply grid gap-3;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.overview-card {
+  @apply flex items-center gap-2 text-left rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-3 cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-700;
+}
+
+.overview-card-name {
+  @apply flex-1 font-medium text-gray-800 dark:text-gray-100 truncate;
+}
+
+.overview-card-status {
+  @apply text-xs text-gray-500 dark:text-gray-400 flex-shrink-0;
+}
+/* Colored buttons must still look disabled when disabled — their color rules
+   above otherwise win over the generic :disabled style (equal specificity,
+   defined later). */
+.controls button.stop-button:disabled,
+.controls button.restart-button:disabled {
+  @apply bg-gray-400 cursor-not-allowed;
+}
+.controls .send-signal-select {
+  @apply bg-primary-500 text-white border-none px-3 py-3 m-0 rounded cursor-pointer text-sm transition-colors h-[38px];
+}
+.controls .send-signal-select:disabled {
+  @apply bg-gray-400 cursor-not-allowed;
 }
 
 .connection-status {
@@ -641,7 +833,7 @@ header {
 
   /* Tab content styling */
   .tab-content {
-    @apply hidden bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 overflow-hidden w-full min-h-400 mx-auto mb-6 relative left-0 right-0 ml-auto mr-auto;
+    @apply hidden bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 overflow-hidden w-full min-h-[400px] mx-auto mb-6 relative left-0 right-0 ml-auto mr-auto;
   }
 
   .tab-content.active {
@@ -704,7 +896,7 @@ header {
   }
 
   .logs-area {
-    @apply min-h-[250px] max-h-400 h-400 px-5 flex-grow-0;
+    @apply min-h-[250px] max-h-[400px] h-[400px] px-5 flex-grow-0;
   }
 
   /* Ensure all buttons are the same height and properly aligned */
@@ -758,7 +950,7 @@ header {
   }
 
   .logs-area {
-    @apply min-h-[200px] max-h-300 h-300 p-4 text-xs flex-grow-0;
+    @apply min-h-[200px] max-h-[300px] h-[300px] p-4 text-xs flex-grow-0;
   }
 
   .log-controls {

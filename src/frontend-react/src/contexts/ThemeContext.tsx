@@ -31,21 +31,28 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     );
   });
 
-  // Calculate actual theme value based on mode and system theme
-  const [theme, setTheme] = useState<ThemeValue>(() => {
-    return mode === "auto" ? systemTheme : mode;
-  });
+  // The actual theme value is derived from mode + system theme — no separate
+  // state needed (deriving avoids a setState-in-effect cascade).
+  const theme: ThemeValue = mode === "auto" ? systemTheme : mode;
 
-  // Update theme when mode or system theme changes
+  // Apply the resolved theme to the document for Tailwind dark mode.
   useEffect(() => {
-    const newTheme = mode === "auto" ? systemTheme : mode;
-    setTheme(newTheme);
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }, [theme]);
 
-    // Update HTML class for Tailwind dark mode
-    document.documentElement.classList.toggle("dark", newTheme === "dark");
-
+  // Persist the chosen mode.
+  useEffect(() => {
     localStorage.setItem("dev-services-dashboard-theme-mode", mode);
-  }, [mode, systemTheme]);
+  }, [mode]);
+
+  // Enable color transitions only after the first paint, so the theme applied
+  // on initial load snaps in rather than animating from the default.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      document.documentElement.classList.add("theme-transitions");
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   // Listen for system theme changes
   useEffect(() => {

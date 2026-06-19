@@ -3,14 +3,22 @@ import { useState, useEffect } from "react";
 
 interface HeaderProps {
   onStartAll?: () => void;
+  onStopAll?: () => void;
+  onToggleOverview?: () => void;
+  overviewActive?: boolean;
   startAllInProgress?: boolean;
+  stopAllDisabled?: boolean;
   hasServices?: boolean;
   dashboardName?: string;
 }
 
 function Header({
   onStartAll,
+  onStopAll,
+  onToggleOverview,
+  overviewActive,
   startAllInProgress,
+  stopAllDisabled,
   hasServices,
   dashboardName,
 }: HeaderProps) {
@@ -77,18 +85,40 @@ function Header({
     </div>
   );
 
-  const startButton = hasServices && onStartAll && (
-    <div className="header-controls">
-      <button
-        className="start-all-header-btn"
-        onClick={onStartAll}
-        disabled={startAllInProgress}
-        title="Start all services"
-      >
-        Start All
-      </button>
-    </div>
-  );
+  const startButton = hasServices &&
+    (onStartAll || onStopAll || onToggleOverview) && (
+      <div className="header-controls">
+        {onToggleOverview && (
+          <button
+            className={`overview-header-btn ${overviewActive ? "active" : ""}`}
+            onClick={onToggleOverview}
+            title="Overview of all services"
+          >
+            Overview
+          </button>
+        )}
+        {onStartAll && (
+          <button
+            className="start-all-header-btn"
+            onClick={onStartAll}
+            disabled={startAllInProgress}
+            title="Start all services"
+          >
+            Start All
+          </button>
+        )}
+        {onStopAll && (
+          <button
+            className="stop-all-header-btn"
+            onClick={onStopAll}
+            disabled={stopAllDisabled}
+            title="Stop all services"
+          >
+            Stop All
+          </button>
+        )}
+      </div>
+    );
 
   const title = dashboardName || "Dev Services Dashboard";
 

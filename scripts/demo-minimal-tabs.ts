@@ -54,8 +54,10 @@ const services: UserServiceConfig[] = [
 // Explicitly use the console logger
 const demoLogger = createConsoleLogger(true);
 
-// Start the Dev Services Dashboard
-startDevServicesDashboard({
+// Start the Dev Services Dashboard. The library doesn't install any process
+// signal handlers itself, so we own shutdown here: on Ctrl+C, stop the
+// dashboard (which stops every service and closes the server) and then exit.
+const dashboard = await startDevServicesDashboard({
   port: 4000,
   hostname: "localhost",
   maxLogLines: 200,
@@ -63,6 +65,25 @@ startDevServicesDashboard({
   services,
   logger: demoLogger,
 });
+
+let isShuttingDown = false;
+const shutdown = async (signal: NodeJS.Signals) => {
+  // A second Ctrl+C while the graceful stop is still running forces an exit.
+  if (isShuttingDown) process.exit(1);
+  isShuttingDown = true;
+
+  console.log(`\nReceived ${signal}, shutting down the demo...`);
+  try {
+    await dashboard.stop();
+    process.exit(0);
+  } catch (err) {
+    console.error("Error during shutdown:", err);
+    process.exit(1);
+  }
+};
+
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
 console.log("");
 console.log("🎉 Minimal Tabs Demo started!");
