@@ -1,6 +1,66 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Class-based dark mode: the `dark:` variant activates for any element under
+   an ancestor carrying the `dark` class (ThemeContext toggles it on <html>).
+   Written as a descendant selector rather than `&:where(.dark, .dark *)` so it
+   stays valid when applied to ::before/::after pseudo-elements. */
+@custom-variant dark (.dark &);
+
+/* Design tokens, ported from the former tailwind.config.js. In v4 these live
+   in CSS and are exposed as both utilities (bg-primary-500) and variables
+   (var(--color-primary-500)). */
+@theme {
+  --color-primary-50: #ebf8ff;
+  --color-primary-100: #bee3f8;
+  --color-primary-200: #90cdf4;
+  --color-primary-300: #63b3ed;
+  --color-primary-400: #4299e1;
+  --color-primary-500: #3182ce; /* #3498db equivalent */
+  --color-primary-600: #2b77cb;
+  --color-primary-700: #2c5aa0;
+  --color-primary-800: #2a4365;
+  --color-primary-900: #1a365d;
+
+  --color-secondary-50: #f7fafc;
+  --color-secondary-100: #edf2f7;
+  --color-secondary-200: #e2e8f0;
+  --color-secondary-300: #cbd5e0;
+  --color-secondary-400: #a0aec0;
+  --color-secondary-500: #718096;
+  --color-secondary-600: #4a5568;
+  --color-secondary-700: #2d3748;
+  --color-secondary-800: #2c3e50; /* Original dark blue color */
+  --color-secondary-900: #1a202c;
+
+  --color-success-400: #48bb78;
+  --color-success-500: #38a169; /* #2ecc71 equivalent */
+  --color-success-600: #2f855a;
+
+  --color-warning-400: #ed8936;
+  --color-warning-500: #dd6b20; /* #f39c12 equivalent */
+  --color-warning-600: #c05621;
+
+  --color-error-400: #fc8181;
+  --color-error-500: #e53e3e; /* #e74c3c equivalent */
+  --color-error-600: #c53030;
+
+  --color-gray-50: #f7fafc;
+  --color-gray-100: #edf2f7;
+  --color-gray-200: #e2e8f0;
+  --color-gray-300: #cbd5e0;
+  --color-gray-400: #a0aec0;
+  --color-gray-500: #718096;
+  --color-gray-600: #4a5568;
+  --color-gray-700: #2d3748;
+  --color-gray-750: #1f2937; /* Custom shade between 700 and 800 for tab differentiation */
+  --color-gray-800: #1a202c;
+  --color-gray-900: #171923;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-mono: "Menlo", "Consolas", monospace;
+}
 
 /* Universal box-sizing reset */
 *,
@@ -34,15 +94,15 @@ body {
 
 /* Custom focus styles for buttons */
 .tab-button:focus {
-  @apply outline-none shadow-[0_0_0_2px_theme(colors.primary.500)] border-transparent z-[2];
+  @apply outline-none shadow-[0_0_0_2px_var(--color-primary-500)] border-transparent z-[2];
 }
 
 .controls button:focus {
-  @apply outline-none shadow-[0_0_0_2px_theme(colors.primary.500)] relative z-[2];
+  @apply outline-none shadow-[0_0_0_2px_var(--color-primary-500)] relative z-[2];
 }
 
 .global-controls button:focus {
-  @apply outline-none shadow-[0_0_0_2px_theme(colors.primary.500)] relative z-[2];
+  @apply outline-none shadow-[0_0_0_2px_var(--color-primary-500)] relative z-[2];
 }
 
 header {
@@ -437,7 +497,7 @@ header {
 }
 
 .tab-content {
-  @apply hidden bg-white dark:bg-gray-800 rounded-lg shadow-lg px-7 py-7 overflow-hidden w-full flex-1 min-h-500 mb-4;
+  @apply hidden bg-white dark:bg-gray-800 rounded-lg shadow-lg px-7 py-7 overflow-hidden w-full flex-1 min-h-[500px] mb-4;
 }
 
 .tab-content.active {
@@ -454,11 +514,11 @@ header {
 }
 
 .logs-container {
-  @apply flex flex-col flex-grow-0 min-h-300 h-auto;
+  @apply flex flex-col flex-grow-0 min-h-[300px] h-auto;
 }
 
 .logs-area {
-  @apply bg-secondary-800 text-gray-100 font-mono text-sm px-6 py-6 rounded-xl border border-gray-300 dark:border-gray-600 overflow-x-auto whitespace-pre-wrap break-all min-h-300 max-h-500 h-500 overflow-y-auto flex-grow-0;
+  @apply bg-secondary-800 text-gray-100 font-mono text-sm px-6 py-6 rounded-xl border border-gray-300 dark:border-gray-600 overflow-x-auto whitespace-pre-wrap break-all min-h-[300px] max-h-[500px] h-[500px] overflow-y-auto flex-grow-0;
 }
 
 .service-title {
@@ -516,7 +576,14 @@ header {
 }
 
 .controls button[id$="-weblink-0"]::before {
-  @apply content-[''] absolute -left-3 top-1/2 -translate-y-1/2 h-7 w-0.5 bg-gray-300 dark:bg-gray-600;
+  @apply content-[''] absolute -left-3 top-1/2 -translate-y-1/2 h-7 w-0.5 bg-gray-300;
+}
+
+/* Dark override written as its own rule: the `dark:` variant can't be @apply'd
+   directly onto a ::before (Tailwind wraps the selector in :is(), which can't
+   hold a pseudo-element). */
+.dark .controls button[id$="-weblink-0"]::before {
+  @apply bg-gray-600;
 }
 
 /* Mobile adjustments for controls */
@@ -547,7 +614,12 @@ header {
 }
 
 .logs-header-divider::before {
-  @apply content-[''] absolute left-0 top-1/2 h-px bg-gray-300 dark:bg-gray-600 w-full;
+  @apply content-[''] absolute left-0 top-1/2 h-px bg-gray-300 w-full;
+}
+
+/* Dark override as its own rule (see note above re: ::before + dark:). */
+.dark .logs-header-divider::before {
+  @apply bg-gray-600;
 }
 
 .logs-header-divider h3 {
@@ -761,7 +833,7 @@ header {
 
   /* Tab content styling */
   .tab-content {
-    @apply hidden bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 overflow-hidden w-full min-h-400 mx-auto mb-6 relative left-0 right-0 ml-auto mr-auto;
+    @apply hidden bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 overflow-hidden w-full min-h-[400px] mx-auto mb-6 relative left-0 right-0 ml-auto mr-auto;
   }
 
   .tab-content.active {
@@ -824,7 +896,7 @@ header {
   }
 
   .logs-area {
-    @apply min-h-[250px] max-h-400 h-400 px-5 flex-grow-0;
+    @apply min-h-[250px] max-h-[400px] h-[400px] px-5 flex-grow-0;
   }
 
   /* Ensure all buttons are the same height and properly aligned */
@@ -878,7 +950,7 @@ header {
   }
 
   .logs-area {
-    @apply min-h-[200px] max-h-300 h-300 p-4 text-xs flex-grow-0;
+    @apply min-h-[200px] max-h-[300px] h-[300px] p-4 text-xs flex-grow-0;
   }
 
   .log-controls {

@@ -16,7 +16,7 @@ export function useWebSocket({
 }: UseWebSocketOptions) {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const isUnmountedRef = useRef(false);
 
   // The socket's event handlers are bound once (on mount), so without this they
