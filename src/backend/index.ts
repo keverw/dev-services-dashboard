@@ -181,10 +181,7 @@ export function startDevServicesDashboard(
           // The server already came up; this is a later runtime error. Do NOT
           // detach this still-running instance from the shutdown registry (that
           // would silently break Ctrl+C for it) — just log it.
-          logger.error(
-            "Dev Services Dashboard server error:",
-            error as object,
-          );
+          logger.error("Dev Services Dashboard server error:", error as object);
           return;
         }
 
