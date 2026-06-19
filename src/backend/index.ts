@@ -138,51 +138,84 @@ export function startDevServicesDashboard(
       // pre-empts our handler above and surfaces as an uncaught exception. By
       // wiring it up inside the listen callback, the bind window stays clean so
       // a bind failure rejects the start promise instead of crashing the process.
-      httpServer.listen(PORT, HOSTNAME, () => {
-        settled = true;
-        logger.info(
-          `Dev Services Dashboard server running on http://${HOSTNAME}:${PORT}`,
-        );
+      httpServer.listen(PORT, HOSTNAME, async () => {
+        // This callback runs after the Promise executor has returned, so the
+        // outer try/catch no longer covers it. Wrap the body so a throw here
+        // (e.g. constructing the WebSocket server) rejects the start promise
+        // instead of leaving the caller's await hanging forever.
+        try {
+          settled = true;
+          logger.info(
+            `Dev Services Dashboard server running on http://${HOSTNAME}:${PORT}`,
+          );
 
-        wsServer = new WebSocketServer({ server: httpServer });
-        const wsHandler = new WebSocketHandler(logger, serviceManager);
-        wsServer.on("connection", (ws) => {
-          wsHandler.handleConnection(ws);
-        });
+          wsServer = new WebSocketServer({ server: httpServer });
+          const wsHandler = new WebSocketHandler(logger, serviceManager);
+          wsServer.on("connection", (ws) => {
+            wsHandler.handleConnection(ws);
+          });
 
-        resolve({
-          httpServer,
-          wsServer,
-          port: PORT,
-          stop: async () => {
-            // Latch shutdown first so no client action (or in-flight start
-            // waiter) can resurrect a service while/after we stop them.
-            serviceManager.beginShutdown();
-            await serviceManager.stopAllServices();
+          resolve({
+            httpServer,
+            wsServer,
+            port: PORT,
+            stop: async () => {
+              // Latch shutdown first so no client action (or in-flight start
+              // waiter) can resurrect a service while/after we stop them.
+              serviceManager.beginShutdown();
+              await serviceManager.stopAllServices();
 
-            // Terminate live WebSocket clients first: otherwise wsServer.close()
-            // waits on them, and their still-open sockets keep the HTTP server
-            // alive so its close() can't complete.
-            for (const client of wsServer.clients) client.terminate();
+              // Terminate live WebSocket clients first: otherwise wsServer.close()
+              // waits on them, and their still-open sockets keep the HTTP server
+              // alive so its close() can't complete.
+              for (const client of wsServer.clients) client.terminate();
 
-            // Await each close so a resolved stop() means the servers have
-            // actually drained — but bound the wait (see STOP_CLOSE_DEADLINE_MS)
-            // so a runtime that doesn't fire the close callback after a
-            // WebSocket upgrade (e.g. Bun) can't hang shutdown.
+              // Await each close so a resolved stop() means the servers have
+              // actually drained — but bound the wait (see STOP_CLOSE_DEADLINE_MS)
+              // so a runtime that doesn't fire the close callback after a
+              // WebSocket upgrade (e.g. Bun) can't hang shutdown.
+              await closeServerWithDeadline(
+                (cb) => wsServer.close(cb),
+                STOP_CLOSE_DEADLINE_MS,
+              );
+
+              // Drop idle keep-alive HTTP sockets so close() can finish promptly
+              // on runtimes that support it.
+              httpServer.closeAllConnections?.();
+              await closeServerWithDeadline(
+                (cb) => httpServer.close(cb),
+                STOP_CLOSE_DEADLINE_MS,
+              );
+            },
+          });
+        } catch (error) {
+          logger.error(
+            "Fatal error starting Dev Services Dashboard server:",
+            error as object,
+          );
+
+          // The port is already bound at this point, so tear the servers back
+          // down before rejecting: otherwise the caller gets a rejected start
+          // promise with no `stop()` handle while the HTTP server stays bound,
+          // hanging the process and failing the next start with EADDRINUSE.
+          // Await the closes (bounded, like stop()) so a caller that retries on
+          // the rejection doesn't race a still-bound port.
+
+          if (wsServer) {
             await closeServerWithDeadline(
-              (cb) => wsServer.close(cb),
+              (cb) => wsServer!.close(cb),
               STOP_CLOSE_DEADLINE_MS,
             );
+          }
 
-            // Drop idle keep-alive HTTP sockets so close() can finish promptly
-            // on runtimes that support it.
-            httpServer.closeAllConnections?.();
-            await closeServerWithDeadline(
-              (cb) => httpServer.close(cb),
-              STOP_CLOSE_DEADLINE_MS,
-            );
-          },
-        });
+          httpServer.closeAllConnections?.();
+          await closeServerWithDeadline(
+            (cb) => httpServer.close(cb),
+            STOP_CLOSE_DEADLINE_MS,
+          );
+
+          reject(error as Error);
+        }
       });
     } catch (error) {
       logger.error(
