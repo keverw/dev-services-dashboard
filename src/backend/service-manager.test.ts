@@ -46,6 +46,9 @@ function makeStream(): MockStream {
 // assertions about ordering and signals.
 const spawnedProcesses: MockProcess[] = [];
 const killLog: Array<{ cmd: string; signal: string | undefined }> = [];
+// Ordered interleaving of spawn() and process.kill() calls (e.g. "spawn:a",
+// "kill:-10000:SIGKILL"), so tests can assert relative ordering of the two.
+const eventLog: string[] = [];
 // Maps each mock process's (unique) pid to itself, so the process.kill spy can
 // resolve a (possibly negative, group) pid back to the mock that owns it.
 const pidToProc = new Map<number, MockProcess>();
@@ -95,16 +98,26 @@ function createMockProcess(): MockProcess {
 // Output the mocked `ps` (used by the escaped-children reap) should report.
 // Tests set this to a "pid ppid\n…" string; default empty = no descendants.
 let psOutput = "";
+// How the mocked `ps` should behave: "close" cleanly (default), emit an
+// "error", or "hang" (never close/error, to exercise the reap's guard timeout).
+let psBehavior: "close" | "error" | "hang" = "close";
 
 const spawnMock = mock(
   (cmd: string, args: string[], opts: Record<string, unknown>) => {
     const proc = createMockProcess();
     proc.spawnArgs = { cmd, args, opts };
     spawnedProcesses.push(proc);
+    eventLog.push(`spawn:${cmd}`);
 
     if (cmd === "ps") {
-      // Simulate `ps`: emit the configured tree, then close.
+      // Simulate `ps` per the configured behavior.
       setTimeout(() => {
+        if (psBehavior === "error") {
+          proc.emit("error", new Error("ps failed"));
+          return;
+        }
+        // "hang": never close or error — exercises the reap's guard timeout.
+        if (psBehavior === "hang") return;
         if (psOutput) proc.stdout.emit(Buffer.from(psOutput));
         proc.emit("close", 0);
       }, 0);
@@ -141,7 +154,15 @@ interface CapturedLog {
 
 function makeManager(
   services: UserServiceConfig[],
-  opts: { maxLogLines?: number } = {},
+  opts: {
+    maxLogLines?: number;
+    timeouts?: {
+      stopTimeout?: number;
+      startTimeout?: number;
+      beforeStartTimeout?: number;
+      afterStartTimeout?: number;
+    };
+  } = {},
 ) {
   const logs: CapturedLog[] = [];
   const broadcasts: Array<Record<string, unknown>> = [];
@@ -152,6 +173,7 @@ function makeManager(
     opts.maxLogLines ?? 200,
     (m) => broadcasts.push(m as Record<string, unknown>),
     undefined,
+    opts.timeouts,
   );
   return { sm, logs, broadcasts };
 }
@@ -199,6 +221,7 @@ beforeEach(() => {
     pid: number,
     signal?: string | number,
   ) => {
+    eventLog.push(`kill:${pid}:${String(signal)}`);
     const proc = pidToProc.get(Math.abs(Number(pid)));
     if (proc) deliverSignal(proc, signal as string | undefined);
     return true;
@@ -210,6 +233,8 @@ beforeEach(() => {
   pidToProc.clear();
   nextPid = 10000;
   psOutput = "";
+  psBehavior = "close";
+  eventLog.length = 0;
 });
 
 afterEach(() => {
@@ -307,6 +332,43 @@ describe("ServiceManager — core behavior", () => {
     ).toBe(true);
   });
 
+  it("force-kill still SIGKILLs the group when `ps` errors", async () => {
+    if (process.platform === "win32") return;
+    const { sm } = makeManager([svc("a")]);
+    await startAndRun(sm, "a");
+    const pid = spawnedProcesses[0].pid;
+    // Ignore SIGTERM so the force-kill path (and the reap) runs.
+    spawnedProcesses[0].exitOnSignals = new Set(["SIGKILL"]);
+    // `ps` fails: the reap can't walk the tree, but the group SIGKILL must still
+    // go out (the reap's promise resolves on the child's 'error') and the
+    // service still stops.
+    psBehavior = "error";
+    await sm.stopService("a");
+    expect(
+      killSpy.mock.calls.some(([p, sig]) => p === -pid && sig === "SIGKILL"),
+    ).toBe(true);
+    expect(sm.getService("a")?.status).toBe("stopped");
+  });
+
+  it("force-kill doesn't hang on a slow `ps` (guard kills it and proceeds)", async () => {
+    if (process.platform === "win32") return;
+    const { sm } = makeManager([svc("a")]);
+    await startAndRun(sm, "a");
+    const pid = spawnedProcesses[0].pid;
+    spawnedProcesses[0].exitOnSignals = new Set(["SIGKILL"]);
+    // `ps` never returns: the reap's guard timeout must SIGKILL the hung `ps`
+    // child and resolve so the group SIGKILL still happens and the stop settles.
+    psBehavior = "hang";
+    await sm.stopService("a");
+    expect(killLog.some((k) => k.cmd === "ps" && k.signal === "SIGKILL")).toBe(
+      true,
+    );
+    expect(
+      killSpy.mock.calls.some(([p, sig]) => p === -pid && sig === "SIGKILL"),
+    ).toBe(true);
+    expect(sm.getService("a")?.status).toBe("stopped");
+  });
+
   it("stopService falls back to SIGKILL after the timeout", async () => {
     const { sm } = makeManager([svc("a")]);
     await startAndRun(sm, "a");
@@ -374,6 +436,155 @@ describe("ServiceManager — core behavior", () => {
     expect(killLog.some((k) => k.signal === "SIGTERM")).toBe(true);
     expect(spawnMock).toHaveBeenCalledTimes(2);
     expect(sm.getService("a")?.status).toBe("running");
+  });
+
+  it("does not promote (or run afterStart) if stopped during the starting window", async () => {
+    let afterStartCalled = false;
+    const { sm, broadcasts } = makeManager([
+      svc("a", {
+        afterStart: async () => {
+          afterStartCalled = true;
+        },
+      }),
+    ]);
+
+    // startService spawns synchronously, but the mock's "spawn" event is async
+    // (a macrotask), so the service sits in `starting` until it fires.
+    await sm.startService("a");
+    expect(sm.getService("a")?.status).toBe("starting");
+
+    // Stop before the queued spawn event fires (the window Stop All can hit on a
+    // `starting` service). The spawn handler must see `stopping` and bail rather
+    // than promote the service or kick off afterStart against a dying process.
+    await sm.stopService("a");
+    await tick();
+    await tick();
+
+    expect(sm.getService("a")?.status).toBe("stopped");
+    expect(afterStartCalled).toBe(false);
+    // No transient `running`/`finalizing` was ever broadcast.
+    expect(
+      broadcasts.some(
+        (b) =>
+          b.type === "status_update" &&
+          (b.status === "running" || b.status === "finalizing"),
+      ),
+    ).toBe(false);
+  });
+
+  it("a start requested while stopping waits for the stop, then starts", async () => {
+    const { sm } = makeManager([svc("a")]);
+    await startAndRun(sm, "a");
+    expect(sm.getService("a")?.status).toBe("running");
+
+    const proc = spawnedProcesses[0];
+    // Ignore every signal so the service lingers in `stopping` until we emit the
+    // exit ourselves — a deterministic stopping window to race a start against.
+    proc.exitOnSignals = new Set();
+
+    const stop = sm.stopService("a");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("stopping");
+
+    // Request a start mid-stop. It must NOT resolve false (silent failure) — it
+    // waits for the stop to finish and then starts a fresh run.
+    const startResult = sm.startAndWait("a");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("stopping"); // parked, waiting
+
+    // The stop completes (process finally exits).
+    proc.emit("exit", null, "SIGTERM");
+
+    await stop;
+    const ok = await startResult;
+
+    expect(ok).toBe(true);
+    expect(sm.getService("a")?.status).toBe("running");
+    // It actually spawned a second time once the stop cleared.
+    expect(
+      spawnedProcesses.filter((p) => p.spawnArgs?.cmd === "a"),
+    ).toHaveLength(2);
+
+    // Regression guard: the fresh process must be TRACKED. It's spawned
+    // synchronously from inside the old stop's `stopped` broadcast; if the stop
+    // handler nulled `service.process` after broadcasting it would clobber this
+    // new handle and orphan a live process. Prove it's tracked by stopping it
+    // again and seeing it actually stop (SIGTERM to the new process).
+    expect(sm.getService("a")?.process).not.toBeNull();
+    const fresh = spawnedProcesses[1];
+    fresh.exitOnSignals = new Set(["SIGTERM"]);
+    killLog.length = 0;
+    await sm.stopService("a");
+    expect(sm.getService("a")?.status).toBe("stopped");
+    expect(killLog.some((k) => k.signal === "SIGTERM")).toBe(true);
+  });
+
+  it("a duplicate stop while awaiting `stopped` keeps the longer stop-wait window", async () => {
+    if (process.platform === "win32") return;
+    // Use REAL timers (not the collapsed ones) with small, well-separated
+    // windows so the process exit can land between `startTimeout` (50ms) and
+    // `stopTimeout + startTimeout` (550ms).
+    globalThis.setTimeout = realSetTimeout;
+    const { sm } = makeManager([svc("a")], {
+      timeouts: { startTimeout: 50, stopTimeout: 500 },
+    });
+
+    expect(await sm.startAndWait("a")).toBe(true);
+
+    const proc = spawnedProcesses[0];
+    proc.exitOnSignals = new Set(); // ignore signals; we emit exit by hand
+
+    const stop = sm.stopService("a");
+    await new Promise((r) => realSetTimeout(r, 5));
+    expect(sm.getService("a")?.status).toBe("stopping");
+
+    // Start mid-stop: arms the long window (stopTimeout + startTimeout = 550ms).
+    const startResult = sm.startAndWait("a");
+
+    // A duplicate stop re-broadcasts `stopping`. The bug re-armed the short
+    // 50ms startTimeout here; the fix ignores it and keeps the 550ms window.
+    await sm.stopService("a");
+
+    // Wait well past the short window (50ms) but inside the long one, then let
+    // the stop finish. Buggy: the start already timed out (false). Fixed: still
+    // waiting, so it starts cleanly.
+    await new Promise((r) => realSetTimeout(r, 150));
+    proc.emit("exit", null, "SIGTERM");
+
+    expect(await startResult).toBe(true);
+    expect(sm.getService("a")?.status).toBe("running");
+    await stop;
+  });
+
+  it("reaps the old group before the mid-stop start spawns (no port race)", async () => {
+    if (process.platform === "win32") return; // no process groups on Windows
+    const { sm } = makeManager([svc("a")]);
+    await startAndRun(sm, "a");
+    const oldPid = spawnedProcesses[0].pid;
+    const proc = spawnedProcesses[0];
+    // Linger in `stopping` until we emit the exit ourselves.
+    proc.exitOnSignals = new Set();
+
+    const stop = sm.stopService("a");
+    await tick();
+    const startResult = sm.startAndWait("a"); // parks awaiting the stop
+    await tick();
+
+    // Focus on the exit handler's ordering.
+    eventLog.length = 0;
+    proc.emit("exit", null, "SIGTERM");
+    await stop;
+    await startResult;
+
+    // The old group's force-kill (SIGKILL to -leaderPid) must be issued BEFORE
+    // the fresh process spawns, so the new process can't race a lingering old
+    // child for the port (EADDRINUSE). Regression: the group kill used to run
+    // after the `stopped` broadcast that synchronously kicks the fresh start.
+    const groupKillIdx = eventLog.indexOf(`kill:${-oldPid}:SIGKILL`);
+    const freshSpawnIdx = eventLog.indexOf("spawn:a");
+    expect(groupKillIdx).toBeGreaterThanOrEqual(0);
+    expect(freshSpawnIdx).toBeGreaterThanOrEqual(0);
+    expect(groupKillIdx).toBeLessThan(freshSpawnIdx);
   });
 
   it("clearServiceLogs truncates logs and broadcasts logs_cleared", () => {
@@ -781,6 +992,112 @@ describe("ServiceManager — beforeStart hook", () => {
 
     expect(sm.getService("a")?.status).toBe("stopped");
     expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it("restart mid-initializing aborts the stale hook and starts a fresh run", async () => {
+    let releaseOld!: () => void;
+    const oldHookGate = new Promise<void>((r) => {
+      releaseOld = r;
+    });
+    let run = 0;
+    let firstSignal: AbortSignal | undefined;
+
+    const { sm } = makeManager([
+      svc("a", {
+        env: { BASE: "1" },
+        webLinks: [{ label: "Base", url: "http://x/0" }],
+        beforeStart: async (ctx) => {
+          run++;
+          if (run === 1) {
+            // Run 1: ignore the abort and keep running, then (much later)
+            // return stale env/links that must be discarded.
+            firstSignal = ctx.signal;
+            await oldHookGate;
+            return {
+              env: { ...ctx.env, STALE: "yes" },
+              webLinks: [{ label: "Stale", url: "http://x/stale" }],
+            };
+          }
+          // Run 2: a clean, fresh start.
+          return { env: { ...ctx.env, FRESH: "yes" } };
+        },
+      }),
+    ]);
+
+    // Run 1 parks in `initializing` on the gated hook (no process spawned yet).
+    void sm.startService("a");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("initializing");
+    expect(spawnMock).not.toHaveBeenCalled();
+
+    // Restart while initializing: must cancel the in-flight hook (not silently
+    // rejoin it) and run a fresh start.
+    await sm.restartService("a");
+    await tick();
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(sm.getService("a")?.status).toBe("running");
+
+    // (a) The fresh run actually spawned, using the fresh hook's env.
+    expect(
+      spawnedProcesses.filter((p) => p.spawnArgs?.cmd === "a"),
+    ).toHaveLength(1);
+    const env = spawnedProcesses[0].spawnArgs?.opts.env as Record<
+      string,
+      string
+    >;
+    expect(env.FRESH).toBe("yes");
+    expect(env.STALE).toBeUndefined();
+
+    // The stale run-1 hook finally settles, returning env/links long after the
+    // abort — they must NOT be applied to the freshly-started service.
+    releaseOld();
+    await tick();
+    await tick();
+
+    expect(sm.getService("a")?.status).toBe("running");
+    expect(
+      sm.getService("a")?.liveWebLinks?.some((l) => l.label === "Stale"),
+    ).toBeFalsy();
+  });
+
+  it("restart starts fresh when the original start was an in-flight startAndWait", async () => {
+    let releaseOld!: () => void;
+    const gate = new Promise<void>((r) => {
+      releaseOld = r;
+    });
+    let run = 0;
+
+    const { sm } = makeManager([
+      svc("a", {
+        beforeStart: async () => {
+          run++;
+          if (run === 1) await gate; // run 1 hangs in `initializing`
+          // run 2 resolves immediately
+        },
+      }),
+    ]);
+
+    // Original start via the WebSocket path (startAndWait), which leaves a
+    // promise in `inFlightStarts` while the slow beforeStart runs.
+    const original = sm.startAndWait("a");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("initializing");
+
+    // Restart while initializing must abort run 1 and begin a FRESH run — not
+    // rejoin (and resolve with) the aborted in-flight startAndWait.
+    await sm.restartService("a");
+    await tick();
+
+    expect(sm.getService("a")?.status).toBe("running");
+    expect(run).toBe(2); // a second beforeStart actually ran
+
+    // The original start resolved as failed (it was aborted), and the service
+    // is up from the fresh run, not parked stopped.
+    releaseOld();
+    await tick();
+    expect(await original).toBe(false);
+    expect(sm.getService("a")?.status).toBe("running");
   });
 
   it("times out a hung beforeStart during Start All: errors it and never spawns", async () => {

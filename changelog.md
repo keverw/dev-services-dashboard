@@ -77,6 +77,7 @@
 - All numeric config options now treat `0` as "unset" and fall back to their defaults (consistent with `port` / `maxLogLines`): the timeouts (`stopTimeout`, `startTimeout`, `beforeStartTimeout`, `afterStartTimeout`, plus the per-service `stopTimeout`) previously took `0` literally — e.g. `stopTimeout: 0` meant an immediate `SIGKILL` and `startTimeout: 0` a 0ms deadline.
 - Log lines now have their ANSI color codes stripped correctly: the previous pattern left a stray escape byte behind and could also eat legitimate text that merely looked like a code (e.g. `arr[0m]`). Logs are rendered as plain text, so color codes are intentionally removed.
 - Running multiple dashboards in one process now shares a single pair of `SIGINT`/`SIGTERM` handlers instead of each call stacking its own (which left every instance racing to `process.exit`); `stop()` fully detaches its instance, and a failed bind no longer leaks a handler. Server errors pushed over the WebSocket now show as a toast instead of a blocking `alert()`.
+- Hardened service lifecycle races: restarting a service still in its `beforeStart` (`initializing`) phase now aborts that hook and runs a fresh start (instead of silently rejoining the in-flight one), a service stopped during the brief `starting` window is no longer promoted to `running` (or sent into its `afterStart` hook) out from under the stop, and a start requested while a service is still `stopping` now waits for the stop to finish and then starts rather than failing.
 
 ### Tests
 

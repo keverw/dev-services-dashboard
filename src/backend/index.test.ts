@@ -171,6 +171,36 @@ describe("Dev Services Dashboard", () => {
       ws.close();
       await server.stop();
     });
+
+    it("broadcasts server messages to connected clients", async () => {
+      const server = await startDevServicesDashboard(testConfig);
+
+      const ws = new WebSocket(`ws://localhost:${server.port}`);
+      await new Promise((resolve) => {
+        ws.onopen = resolve;
+      });
+
+      // clear_logs triggers a `logs_cleared` broadcast to every open client —
+      // exercising the broadcast fan-out (not the direct initial_state send).
+      const cleared = await new Promise((resolve, reject) => {
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "logs_cleared") resolve(data);
+        };
+        ws.send(
+          JSON.stringify({ action: "clear_logs", serviceID: "test-service" }),
+        );
+        setTimeout(reject, 1000);
+      });
+
+      expect(cleared).toMatchObject({
+        type: "logs_cleared",
+        serviceID: "test-service",
+      });
+
+      ws.close();
+      await server.stop();
+    });
   });
 
   describe("Service Process Management", () => {

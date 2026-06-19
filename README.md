@@ -73,7 +73,7 @@ Perfect for local development where you need to run multiple interdependent serv
 1. **Install the package:**
 
    ```bash
-   bun install dev-services-dashboard
+   bun add dev-services-dashboard
    # or
    npm add dev-services-dashboard
    # or
@@ -390,7 +390,7 @@ If the hook **throws**, the just-started process is torn back down (it's already
 
 Stopping a service sends `SIGTERM`, then escalates to `SIGKILL` if it hasn't exited within the stop timeout (default 5000ms, configurable globally via `stopTimeout` or per service via `stopTimeout`).
 
-> **Note:** **Restart** stops the service (only when it has a live process, including one still coming up in `starting`/`finalizing`; when there's no live process, e.g. an already `stopped`/`error`/`crashed` service, it just starts it) and then waits a brief fixed settle pause (500ms) before starting it again, giving the OS time to release the old process's resources (e.g. its listening port) so the fresh process doesn't immediately hit `EADDRINUSE` on a fast restart.
+> **Note:** **Restart** tears down whatever is in flight first: a live process (including one still coming up in `starting`/`finalizing`), or an in-flight `beforeStart` hook (`initializing`), which it aborts. An already `stopped`/`error`/`crashed` service it just starts. After tearing down a live process it waits a brief fixed settle pause (500ms) before starting again, giving the OS time to release the old process's resources (e.g. its listening port) so the fresh process doesn't immediately hit `EADDRINUSE` on a fast restart. (Restarting from `initializing` has no process to release, so that pause is skipped.)
 
 On POSIX, services are spawned **detached** so each leads its own process group, and (by default) stop signals the **whole group** (not just the process you launched). This matters because many dev commands are wrappers, such as `bun run`, `npm run`, `vite`, `nodemon`, or a shell script, that fork the actual server as a child. Signaling only the wrapper can leave that child alive holding its port, so the next start fails with `EADDRINUSE`. Group termination reaps the wrapper and its children together.
 

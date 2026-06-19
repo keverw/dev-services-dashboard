@@ -125,7 +125,7 @@ export class ServiceManager {
   private readonly beforeStartTimeout: number;
   private readonly afterStartTimeout: number;
   // One-shot listeners that "Start All" registers per service to be notified
-  // (via broadcastStatus) when the service it's waiting on changes status.
+  // (via setStatus) when the service it's waiting on changes status.
   private startWaiters = new Map<string, (status: Service["status"]) => void>();
   // In-flight `startAndWait` runs, keyed by serviceID. A second concurrent
   // start of the same service attaches to the existing run's promise rather
@@ -310,13 +310,33 @@ export class ServiceManager {
     this.broadcastFn({ type: "log", serviceID, line, logType, timestamp });
   }
 
-  private broadcastStatus(
+  /**
+   * The single status-transition point. Writes the service's `status` and
+   * `errorDetails`, broadcasts the change to clients, reverts dynamic web links
+   * when the service is no longer up, and notifies any `startAndWait` waiter.
+   *
+   * Every status change goes through here, so callers never assign
+   * `service.status` themselves — they call `setStatus`.
+   *
+   * The waiter is notified **asynchronously** (on a microtask), never inline.
+   * This is load-bearing: a waiter reacts to `stopped` by starting a fresh
+   * process, and if that ran synchronously it would execute in the middle of
+   * the emitter's own work — e.g. an exit handler that still has to null the
+   * process handle and reap the old process group — corrupting it (a clobbered
+   * handle, a port race). Deferring guarantees the emitter finishes its
+   * synchronous teardown before any waiter runs, so no emitter has to order its
+   * cleanup around re-entrant restarts.
+   */
+  private setStatus(
     serviceID: string,
     status: Service["status"],
     errorDetails: string | null = null,
-  ) {
+  ): void {
     const service = this.getService(serviceID);
-    if (service) service.errorDetails = errorDetails;
+    if (service) {
+      service.status = status;
+      service.errorDetails = errorDetails;
+    }
     this.broadcastFn({
       type: "status_update",
       serviceID,
@@ -341,8 +361,11 @@ export class ServiceManager {
       });
     }
 
-    // Notify a "Start All" waiter watching this service for status changes.
-    this.startWaiters.get(serviceID)?.(status);
+    // Notify the start waiter asynchronously (see the doc comment). Capture the
+    // current waiter so a later-registered one can't receive this now-stale
+    // status; the waiter itself also ignores calls once it has settled.
+    const waiter = this.startWaiters.get(serviceID);
+    if (waiter) queueMicrotask(() => waiter(status));
   }
 
   async startService(serviceID: string) {
@@ -374,8 +397,7 @@ export class ServiceManager {
 
     // Run the optional pre-start hook before spawning the process.
     if (service.beforeStart) {
-      service.status = "initializing";
-      this.broadcastStatus(serviceID, service.status);
+      this.setStatus(serviceID, "initializing");
       this.addLog(
         serviceID,
         `Running pre-start hook for ${service.name}...`,
@@ -429,21 +451,19 @@ export class ServiceManager {
         if (controller.signal.aborted) return;
 
         const message = err instanceof Error ? err.message : String(err);
-        service.status = "error";
         this.logger.error(
           `Pre-start hook failed for ${service.name}:`,
           err as object,
         );
         this.addLog(serviceID, `Pre-start hook failed: ${message}`, "system");
-        this.broadcastStatus(serviceID, service.status, message);
+        this.setStatus(serviceID, "error", message);
         return;
       }
 
       clearOwnController();
     }
 
-    service.status = "starting";
-    this.broadcastStatus(serviceID, service.status);
+    this.setStatus(serviceID, "starting");
     this.addLog(serviceID, `Attempting to start ${service.name}...`, "system");
 
     try {
@@ -461,18 +481,25 @@ export class ServiceManager {
           `Service ${service.name} started (PID: ${service.process?.pid}).`,
         );
 
+        // If the service was stopped during the brief `starting` window (after
+        // spawn() returned but before this event fired — e.g. Stop All targets a
+        // `starting` service), the stop path now owns it: it has set `stopping`
+        // and is tearing the process down. Don't promote it to `running` (or
+        // kick off afterStart against a process being SIGTERM'd) out from under
+        // the stop. The normal path is always `starting` here.
+        if (service.status !== "starting") return;
+
         // If there's a post-start hook, run it as a readiness gate before
         // reporting `running`; otherwise the process being up is enough.
         if (service.afterStart) {
           void this.runAfterStart(serviceID, mergedEnv);
         } else {
-          service.status = "running";
           this.addLog(
             serviceID,
             `${service.name} started successfully.`,
             "system",
           );
-          this.broadcastStatus(serviceID, service.status);
+          this.setStatus(serviceID, "running");
         }
       });
 
@@ -484,15 +511,14 @@ export class ServiceManager {
       );
 
       service.process.on("error", (err) => {
-        service.status = "error";
         this.logger.error(`Failed to start service ${service.name}:`, err);
         this.addLog(
           serviceID,
           `Error starting ${service.name}: ${err.message}`,
           "system",
         );
-        this.broadcastStatus(serviceID, service.status, err.message);
         service.process = null;
+        this.setStatus(serviceID, "error", err.message);
       });
 
       service.process.on("exit", (code, signal) => {
@@ -553,9 +579,6 @@ export class ServiceManager {
           errorDetails = `Unexpected exit (code: ${code}, signal: ${signal})`;
         }
 
-        service.status = newStatus;
-        service.errorDetails = errorDetails;
-
         const exitMessage = `Service ${service.name} ${exitType} (code ${code}, signal ${signal}).`;
         const logLevel = newStatus === "stopped" ? "info" : "error";
 
@@ -565,12 +588,14 @@ export class ServiceManager {
           this.logger.error(exitMessage);
         }
         this.addLog(serviceID, exitMessage, "system");
-        this.broadcastStatus(serviceID, service.status, service.errorDetails);
+        // Clear the handle before the transition so the broadcast reflects a
+        // fully-dead service. (Waiter notification is async, so this ordering
+        // is just for a consistent snapshot, not correctness.)
         service.process = null;
+        this.setStatus(serviceID, newStatus, errorDetails);
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      service.status = "error";
       this.logger.error(
         `Exception starting service ${service.name}:`,
         err as object,
@@ -580,8 +605,8 @@ export class ServiceManager {
         `Exception starting ${service.name}: ${message}`,
         "system",
       );
-      this.broadcastStatus(serviceID, service.status, message);
       service.process = null;
+      this.setStatus(serviceID, "error", message);
     }
   }
 
@@ -600,13 +625,12 @@ export class ServiceManager {
     const service = this.getService(serviceID);
     if (!service || !service.afterStart || !service.process) return;
 
-    service.status = "finalizing";
     this.addLog(
       serviceID,
       `Running post-start hook for ${service.name}...`,
       "system",
     );
-    this.broadcastStatus(serviceID, service.status);
+    this.setStatus(serviceID, "finalizing");
 
     const controller = new AbortController();
     this.abortControllers.set(serviceID, controller);
@@ -655,9 +679,8 @@ export class ServiceManager {
         });
       }
 
-      service.status = "running";
       this.addLog(serviceID, `${service.name} started successfully.`, "system");
-      this.broadcastStatus(serviceID, service.status);
+      this.setStatus(serviceID, "running");
     } catch (err) {
       // If a newer start has replaced our controller, this run is stale (the
       // service was stopped/restarted while a signal-ignoring hook kept
@@ -697,8 +720,7 @@ export class ServiceManager {
         // exit that left the service `stopped`). The hook still failed, so make
         // that authoritative: a thrown afterStart is a failed start (`error`),
         // which Start All treats as a failure and uses to skip dependents.
-        service.status = "error";
-        this.broadcastStatus(serviceID, service.status, message);
+        this.setStatus(serviceID, "error", message);
       }
     }
   }
@@ -920,7 +942,6 @@ export class ServiceManager {
       const controller = this.abortControllers.get(serviceID);
       controller?.abort();
       this.abortControllers.delete(serviceID);
-      service.status = "stopped";
       this.logger.info(
         `Service ${service.name} stopped during initialization.`,
       );
@@ -929,7 +950,7 @@ export class ServiceManager {
         `${service.name} stopped before start (pre-start hook aborted).`,
         "system",
       );
-      this.broadcastStatus(serviceID, service.status);
+      this.setStatus(serviceID, "stopped");
       return;
     }
 
@@ -942,24 +963,22 @@ export class ServiceManager {
         service &&
         (service.status === "stopped" || service.status === "stopping")
       ) {
-        this.broadcastStatus(serviceID, service.status, service.errorDetails);
+        this.setStatus(serviceID, service.status, service.errorDetails);
       }
       return;
     }
 
     this.logger.info(`Stopping service: ${service.name}...`);
-    service.status = "stopping";
-    this.broadcastStatus(serviceID, service.status);
+    this.setStatus(serviceID, "stopping");
     this.addLog(serviceID, `Attempting to stop ${service.name}...`, "system");
 
     return new Promise((resolve) => {
       if (!service.process) {
-        service.status = opts.finalStatus ?? "stopped";
-
-        if (opts.finalStatus)
-          service.errorDetails = opts.errorDetails ?? service.errorDetails;
-
-        this.broadcastStatus(serviceID, service.status, service.errorDetails);
+        const finalStatus = opts.finalStatus ?? "stopped";
+        const finalErrorDetails = opts.finalStatus
+          ? (opts.errorDetails ?? service.errorDetails)
+          : service.errorDetails;
+        this.setStatus(serviceID, finalStatus, finalErrorDetails);
         resolve();
         return;
       }
@@ -971,22 +990,29 @@ export class ServiceManager {
         this.logger.info(`Service ${service.name} confirmed stopped.`);
         this.addLog(serviceID, `${service.name} confirmed stopped.`, "system");
 
-        if (opts.finalStatus) {
-          service.status = opts.finalStatus;
-          service.errorDetails = opts.errorDetails ?? service.errorDetails;
-        } else if (service.status !== "error") {
-          service.status = "stopped";
-        }
+        // Settle on the requested final status, or `stopped` for a normal stop
+        // (keeping an already-`error` status if something set it mid-stop).
+        const finalStatus: Service["status"] = opts.finalStatus
+          ? opts.finalStatus
+          : service.status === "error"
+            ? "error"
+            : "stopped";
+        const finalErrorDetails = opts.finalStatus
+          ? (opts.errorDetails ?? service.errorDetails)
+          : service.errorDetails;
 
-        this.broadcastStatus(serviceID, service.status, service.errorDetails);
+        // Tear down fully (drop the handle, reap the old group) before the
+        // transition so the broadcast reflects a fully-dead service. Waiter
+        // notification is async (see setStatus), so a mid-stop start can't run
+        // until this handler returns — the ordering here is just for a clean
+        // snapshot, no longer load-bearing against re-entrant restarts.
         service.process = null;
         clearTimeout(timeout);
         // Default (group SIGTERM) services: the leader has exited, but members
         // of its group may still be alive (e.g. a child that ignored SIGTERM),
-        // so force-kill the group to reap them before resolving — otherwise
-        // stop returns with children still holding ports. No-op if the group
-        // is already empty, and it's in the same tick as the exit so there's
-        // no pid-reuse window.
+        // so force-kill the group to reap them. No-op if the group is already
+        // empty, and it's in the same tick as the exit so there's no pid-reuse
+        // window.
         //
         // gracefulShutdown services are deliberately excluded: SIGTERM went to
         // the main process only so it can coordinate its own children, so we
@@ -1003,6 +1029,8 @@ export class ServiceManager {
             // Group already empty — nothing left to reap.
           }
         }
+
+        this.setStatus(serviceID, finalStatus, finalErrorDetails);
         resolve();
       });
 
@@ -1049,6 +1077,11 @@ export class ServiceManager {
       "system",
     );
 
+    // Stop first if there's anything to tear down. A live process (running /
+    // starting / finalizing) needs killing; `initializing` has no process yet
+    // but is still an in-flight start whose `beforeStart` stopService aborts, so
+    // a restart there must cancel it and run a fresh one rather than silently
+    // rejoin the existing hook run.
     if (
       service.process &&
       service.status !== "stopped" &&
@@ -1059,7 +1092,21 @@ export class ServiceManager {
       // releasing the old process's resources (e.g. its listening port) so the
       // new process doesn't immediately hit EADDRINUSE on a fast restart.
       await new Promise((resolve) => setTimeout(resolve, 500));
+    } else if (service.status === "initializing") {
+      // Pre-spawn: no process to release (so no settle pause), but abort the
+      // in-flight pre-start hook so the start below runs a fresh one.
+      await this.stopService(serviceID);
     }
+
+    // The start we just aborted may still be an in-flight `startAndWait` run
+    // (the normal WebSocket start path leaves a promise in `inFlightStarts`,
+    // e.g. a service hung in a slow `beforeStart`). That entry is cleared
+    // asynchronously once the run settles, so wait for it here — otherwise the
+    // `startAndWait` below would rejoin the just-aborted run and resolve with
+    // its (failed) result instead of beginning a fresh start.
+    const pending = this.inFlightStarts.get(serviceID);
+    if (pending) await pending;
+
     // Use the timeout-aware path so a hung beforeStart/afterStart on restart
     // can't leave the service stuck in initializing/finalizing forever.
     await this.startAndWait(serviceID);
@@ -1188,16 +1235,15 @@ export class ServiceManager {
       // error directly. The hook's abort guard makes it bail without spawning.
       this.abortControllers.get(serviceID)?.abort();
       this.abortControllers.delete(serviceID);
-      service.status = "error";
       service.process = null;
-      this.broadcastStatus(serviceID, service.status, reason);
+      this.setStatus(serviceID, "error", reason);
     }
   }
 
   /**
    * Starts a service and resolves once it reaches a terminal start state:
    * `true` on `running`, `false` on error/crash/stop or timeout. The wait is
-   * driven by status broadcasts (broadcastStatus → startWaiters), and uses
+   * driven by status transitions (setStatus → startWaiters), and uses
    * three windows: `beforeStartTimeout` while `initializing`, `startTimeout`
    * while `starting`, `afterStartTimeout` while `finalizing`. A window elapsing
    * is a hard deadline — see `failStartOnTimeout`.
@@ -1270,21 +1316,59 @@ export class ServiceManager {
         void this.failStartOnTimeout(serviceID).then(() => resolve(false));
       };
 
+      // When a start is requested while the service is still `stopping`, we
+      // don't fail it — we wait for the in-flight stop to finish (`stopped`) and
+      // then start a fresh run, so "start" means "start" even mid-stop. The flag
+      // flips off once that start is kicked, after which a later `stopped` is a
+      // genuine failed start again.
+      let awaitingStop = false;
+
       this.startWaiters.set(serviceID, (status) => {
+        // Notifications arrive asynchronously (see setStatus), so a status
+        // queued before this run settled can still be delivered afterwards;
+        // ignore it once settled so a stale event can't arm a stray timer.
+        if (settled) return;
         if (status === "running") finish(true);
-        else if (
-          status === "error" ||
-          status === "crashed" ||
-          status === "stopped"
-        )
-          finish(false);
-        else armForStatus(status);
+        else if (status === "stopped") {
+          if (awaitingStop) {
+            // The pending stop completed — now actually start it.
+            awaitingStop = false;
+            arm(this.startTimeout);
+            void this.startService(serviceID);
+          } else {
+            finish(false);
+          }
+        } else if (status === "error" || status === "crashed") finish(false);
+        else if (awaitingStop) {
+          // Still waiting for the in-flight stop to finish. A duplicate
+          // stopService() call re-broadcasts `stopping`; ignore it so the
+          // longer stop-wait deadline armed below stays put — re-arming the
+          // shorter `startTimeout` here could time the start out before the
+          // stop completes, so it would never start.
+          return;
+        } else armForStatus(status);
       });
 
       const service = this.getService(serviceID);
       // Already up — nothing to wait for.
       if (service?.status === "running") {
         finish(true);
+        return;
+      }
+
+      // Start requested while the service is still tearing down: wait for the
+      // stop to finish, then start a fresh run (the waiter above kicks the start
+      // on `stopped`). The stop's own SIGKILL fires at `stopTimeout`, so we wait
+      // that long plus a further `startTimeout` of grace for the kill to be
+      // reaped before giving up — a genuinely hung stop fails the start rather
+      // than parking here forever, while a merely-slow teardown still gets a
+      // generous window to complete.
+      if (service?.status === "stopping") {
+        awaitingStop = true;
+        arm(
+          positiveOr(service.stopTimeout, this.defaultStopTimeout) +
+            this.startTimeout,
+        );
         return;
       }
 
