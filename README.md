@@ -182,12 +182,12 @@ await dashboard.stop();
 
 The resolved `DevUIServer` object exposes:
 
-| Property     | Type                | Description                                                           |
-| ------------ | ------------------- | --------------------------------------------------------------------- |
-| `httpServer` | http.Server         | The underlying Node HTTP server                                       |
-| `wsServer`   | WebSocketServer     | The underlying `ws` WebSocket server                                  |
+| Property     | Type                | Description                                                                                                               |
+| ------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `httpServer` | http.Server         | The underlying Node HTTP server                                                                                           |
+| `wsServer`   | WebSocketServer     | The underlying `ws` WebSocket server                                                                                      |
 | `port`       | number              | The port the server is listening on (the normalized config `port`, a non-positive value falls back to the default `4000`) |
-| `stop`       | () => Promise<void> | Stops all running services, then closes the HTTP and WebSocket server |
+| `stop`       | () => Promise<void> | Stops all running services, then closes the HTTP and WebSocket server                                                     |
 
 The dashboard's own UI talks to the server over `wsServer`, but it's the raw `ws` server, so you can attach your own listeners too. If you want to read the frames the server broadcasts (or send your own), the wire protocol types are exported: `ServerMessage` and `ClientMessage` (the discriminated unions for each direction), plus `InitialStateService`, `LogEntry`, `ServiceStatusValue`, and `StartAllResult` / `StopAllResult` (the per-service `result` values in the Start All / Stop All progress frames).
 
@@ -277,6 +277,8 @@ Services can declare dependencies with `dependsOn` (an array of service `id`s). 
 - **Stop All** stops services sequentially in **reverse** order, so dependents shut down before the dependencies they rely on.
 - Starting a **single** service manually whose dependencies aren't running shows a non-blocking warning but still starts it. `dependsOn` is an orchestration hint, not enforced runtime wiring.
 - An unknown dependency `id` is ignored with a warning. A **self-dependency** or a dependency **cycle** is a fatal configuration error, and the dashboard refuses to start (the error message includes the cycle path).
+
+> **Note:** Single-service controls stay enabled during a **Start All** run, so you keep full manual control, but there's one interaction worth knowing. Start All advances by waiting for each service to reach `running`, and it treats any transition to `stopped`, `error`, or `crashed` as a failed start. So if you **stop** or **restart** (which stops first) the service Start All is currently waiting on, Start All counts it as **failed** and skips its dependents, even though a restart then brings the service back up. For a clean Start All run, wait for it to finish before stopping or restarting individual services.
 
 ```typescript
 const services: UserServiceConfig[] = [
@@ -388,7 +390,7 @@ If the hook **throws**, the just-started process is torn back down (it's already
 
 Stopping a service sends `SIGTERM`, then escalates to `SIGKILL` if it hasn't exited within the stop timeout (default 5000ms, configurable globally via `stopTimeout` or per service via `stopTimeout`).
 
-> **Note:** **Restart** stops the service (only when a process is actually running, when restarting an already `stopped`/`error`/`crashed` service just starts it) and then waits a brief fixed settle pause (500ms) before starting it again, giving the OS time to release the old process's resources (e.g. its listening port) so the fresh process doesn't immediately hit `EADDRINUSE` on a fast restart.
+> **Note:** **Restart** stops the service (only when it has a live process, including one still coming up in `starting`/`finalizing`; when there's no live process, e.g. an already `stopped`/`error`/`crashed` service, it just starts it) and then waits a brief fixed settle pause (500ms) before starting it again, giving the OS time to release the old process's resources (e.g. its listening port) so the fresh process doesn't immediately hit `EADDRINUSE` on a fast restart.
 
 On POSIX, services are spawned **detached** so each leads its own process group, and (by default) stop signals the **whole group** (not just the process you launched). This matters because many dev commands are wrappers, such as `bun run`, `npm run`, `vite`, `nodemon`, or a shell script, that fork the actual server as a child. Signaling only the wrapper can leave that child alive holding its port, so the next start fails with `EADDRINUSE`. Group termination reaps the wrapper and its children together.
 
