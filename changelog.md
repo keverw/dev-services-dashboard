@@ -47,7 +47,7 @@
   - Added consistent border styling to logs area for better visual definition
   - Improved spacing balance around logs section divider and controls for better visual hierarchy
 
-## 0.1.0 (June 17, 2026)
+## 0.1.0 (June 18, 2026)
 
 ### Features
 

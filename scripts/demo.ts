@@ -284,8 +284,13 @@ console.log("  • Start/stop/restart individual services or all at once");
 console.log(
   "  • dependsOn ordering (api waits for db/db2/redis; ssr/admin wait for api/auth)",
 );
-console.log("  • Custom signals dropdown (SIGHUP/SIGUSR2) on api/auth/ssr");
+console.log(
+  "  • Custom signals dropdown: SIGHUP + SIGUSR2 on api, SIGHUP on auth/ssr",
+);
 console.log("  • beforeStart pre-start hook on the API server (warm-up step)");
+console.log(
+  "  • afterStart post-start hook on the database (readiness/migration step)",
+);
 console.log("  • Real-time log streaming with auto-scroll");
 console.log("  • Service status indicators and connection monitoring");
 console.log("  • Web link buttons for quick access to related URLs");
