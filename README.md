@@ -15,6 +15,7 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
 - [Usage](#usage)
   - [Quick Setup](#quick-setup)
   - [Configuration Options](#configuration-options)
+    - [Storing Config in Separate Files](#storing-config-in-separate-files)
     - [Return Value](#return-value)
     - [Shutting Down](#shutting-down)
   - [Service Configuration](#service-configuration)
@@ -177,6 +178,54 @@ The `startDevServicesDashboard` function accepts a configuration object with the
 **Note**: All numeric options treat any non-positive or non-finite value (`0`, a negative number, or `NaN`) as "unset" and fall back to their defaults: `port` (`4000`), `maxLogLines` (`200`), `stopTimeout` (`5000`), `startTimeout` (`10000`), and `beforeStartTimeout` / `afterStartTimeout` (`60000`), including the per-service `stopTimeout`. So there's no way to disable the log buffer with `maxLogLines: 0` (use a small positive number instead) or to force an immediate `SIGKILL` with `stopTimeout: 0`, and a stray negative value can't empty the buffer or collapse a timeout to `0ms`. Likewise, an empty, whitespace-only, or non-string `hostname` or `dashboardName` falls back to its default (`localhost` and `Dev Services Dashboard` respectively), and a valid one is trimmed of surrounding whitespace.
 
 > **⚠️ Binding & network exposure**: `hostname` defaults to `localhost` (the loopback interface, `127.0.0.1`/`::1`), which only accepts connections from your own machine, so other devices on the network can't reach it. Set it to `0.0.0.0` (bind **all** interfaces) or a specific interface IP to make the dashboard reachable from other devices on your LAN, but the dashboard has **no authentication** and can start, stop, and signal arbitrary processes on the host, so only expose it on a network you trust. (Note: `0.0.0.0` is the _most_ exposed binding, not the most private. It's the opposite of `localhost`.)
+
+#### Storing Config in Separate Files
+
+You don't have to build the config inline at the call site. Both config types are exported, so you can keep your services (and the whole dashboard config) in their own files and import them. This keeps your runner script tiny and gives you type-checking on the config wherever it lives.
+
+For example, you might keep the dashboard files together in a subfolder like `scripts/dev-services-dashboard/`. Type just the services array with `UserServiceConfig[]`:
+
+```typescript
+// scripts/dev-services-dashboard/services.ts
+import type { UserServiceConfig } from "dev-services-dashboard";
+
+export const services: UserServiceConfig[] = [
+  { id: "db", name: "Database", command: ["bun", "run", "scripts/dev-db.ts"] },
+  {
+    id: "api",
+    name: "API Server",
+    command: ["bun", "run", "src/apps/api-server/index.ts"],
+    dependsOn: ["db"],
+  },
+];
+```
+
+Or type the entire config object with `DevUIConfig` (this also type-checks the top-level options, so a misspelled option like `beforeStartTimeout` is caught):
+
+```typescript
+// scripts/dev-services-dashboard/config.ts
+import type { DevUIConfig } from "dev-services-dashboard";
+import { services } from "./services";
+
+export const dashboardConfig: DevUIConfig = {
+  dashboardName: "My Project",
+  port: 4000,
+  services,
+};
+```
+
+Then the runner just imports and starts it:
+
+```typescript
+// scripts/dev-ui-runner.ts
+import { startDevServicesDashboard } from "dev-services-dashboard";
+import { dashboardConfig } from "./dev-services-dashboard/config";
+
+const dashboard = await startDevServicesDashboard(dashboardConfig);
+// ... wire up your own shutdown (see "Shutting Down" below).
+```
+
+The hook context/return types (`BeforeStartContext`, `BeforeStartResult`, `AfterStartContext`, `AfterStartResult`) are exported too, so a `beforeStart`/`afterStart` hook can also be written in its own file and typed against its context.
 
 #### Return Value
 
