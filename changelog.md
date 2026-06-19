@@ -7,7 +7,7 @@
 - [0.0.3 (June 8, 2025)](#003-june-8-2025)
 - [0.0.4 (June 8, 2025)](#004-june-8-2025)
 - [0.0.5 (June 8, 2025)](#005-june-8-2025)
-- [0.1.0 (June 17, 2026)](#010-june-17-2026)
+- [0.1.0 (June 18, 2026)](#010-june-18-2026)
   - [Features](#features)
   - [UX / fixes](#ux--fixes)
   - [Tests](#tests)
@@ -76,7 +76,9 @@
 - Light/dark theme switching now fades smoothly instead of snapping (and doesn't animate on the initial page load).
 - All numeric config options now treat `0` as "unset" and fall back to their defaults (consistent with `port` / `maxLogLines`): the timeouts (`stopTimeout`, `startTimeout`, `beforeStartTimeout`, `afterStartTimeout`, plus the per-service `stopTimeout`) previously took `0` literally — e.g. `stopTimeout: 0` meant an immediate `SIGKILL` and `startTimeout: 0` a 0ms deadline.
 - Log lines now have their ANSI color codes stripped correctly: the previous pattern left a stray escape byte behind and could also eat legitimate text that merely looked like a code (e.g. `arr[0m]`). Logs are rendered as plain text, so color codes are intentionally removed.
-- Running multiple dashboards in one process now shares a single pair of `SIGINT`/`SIGTERM` handlers instead of each call stacking its own (which left every instance racing to `process.exit`); `stop()` fully detaches its instance, and a failed bind no longer leaks a handler. Server errors pushed over the WebSocket now show as a toast instead of a blocking `alert()`.
+- The dashboard no longer installs its own `SIGINT`/`SIGTERM` handlers or calls `process.exit()`. As a library it leaves process lifecycle to the caller (no global side effects on start, and safe to embed in a larger app with its own signal handling). Call the returned `stop()` (which stops all services, then closes the server) from your own handler to shut down on `Ctrl+C`; the README and demo scripts show the pattern. Server errors pushed over the WebSocket now show as a toast instead of a blocking `alert()`.
+- A failed server bind (e.g. the port is already in use) now reliably rejects the `startDevServicesDashboard` promise instead of, on some runtimes, surfacing as an uncaught exception. The HTTP `error` handler is attached before `listen()`, and the WebSocket server is attached only once the HTTP server is listening, so the `ws` server's own `error` listener can't pre-empt ours and throw during the bind window.
+- `stop()` now terminates any live WebSocket clients and awaits the HTTP and WebSocket servers closing (best-effort: close errors are swallowed), so a resolved `stop()` normally means the servers have drained rather than just stopped accepting. Each close is bounded by a short internal deadline so a runtime that doesn't fire its close callback after a WebSocket upgrade (e.g. Bun) can't hang shutdown.
 - Hardened service lifecycle races: restarting a service still in its `beforeStart` (`initializing`) phase now aborts that hook and runs a fresh start (instead of silently rejoining the in-flight one), a service stopped during the brief `starting` window is no longer promoted to `running` (or sent into its `afterStart` hook) out from under the stop, and a start requested while a service is still `stopping` now waits for the stop to finish and then starts rather than failing.
 
 ### Tests
@@ -84,7 +86,7 @@
 - Added `service-manager.test.ts` — unit tests that exercise `ServiceManager` directly (no HTTP/WS stack) covering core lifecycle, custom signals, `dependsOn` ordering, and the `beforeStart` hook. Also covers stdout/stderr log piping, the process `error` event, and recovery from a `crashed` state.
 - Added `logger.test.ts` covering `createConsoleLogger` (enabled/disabled/default) and the `Logger` wrapper.
 - Added WebSocket integration tests for the new `send_signal` (missing-signal validation) and `stop_all` actions.
-- Raised backend coverage from ~89% to ~94% lines; `service-manager.ts` and `logger.ts` are now at 100%.
+- Raised backend coverage to ~99% lines; `http-handler.ts`, `service-manager.ts`, `logger.ts`, and the frontend VFS bundle are at 100%, and `index.ts` is covered down to the failed-bind path. Added tests for the VFS middleware's ETag `304` and non-GET fall-through paths and for a rejected start on a bind failure.
 
 ### Build / tooling
 

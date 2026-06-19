@@ -867,6 +867,56 @@ describe("ServiceManager — stopAllServices", () => {
   });
 });
 
+describe("ServiceManager — shutdown latch", () => {
+  it("isShuttingDown flips once beginShutdown is called", () => {
+    const { sm } = makeManager([svc("a")]);
+    expect(sm.isShuttingDown()).toBe(false);
+    sm.beginShutdown();
+    expect(sm.isShuttingDown()).toBe(true);
+  });
+
+  it("refuses to start a service once shutting down (no process spawned)", async () => {
+    const { sm } = makeManager([svc("a")]);
+    sm.beginShutdown();
+
+    await sm.startService("a");
+    await tick();
+    expect(sm.getService("a")?.status).toBe("stopped");
+    expect(spawnedProcesses).toHaveLength(0);
+
+    // startAndWait reports a failed start rather than spawning.
+    await expect(sm.startAndWait("a")).resolves.toBe(false);
+    expect(spawnedProcesses).toHaveLength(0);
+  });
+
+  it("startAllServices is a no-op once shutting down (no begin frame)", async () => {
+    const { sm, broadcasts } = makeManager([svc("a"), svc("b")]);
+    sm.beginShutdown();
+
+    await sm.startAllServices();
+    expect(
+      broadcasts.find((b) => b.type === "start_all_begin"),
+    ).toBeUndefined();
+    expect(spawnedProcesses).toHaveLength(0);
+  });
+
+  it("does not resurrect a running service via restart once shutting down", async () => {
+    const { sm } = makeManager([svc("a")]);
+    await startAndRun(sm, "a");
+    expect(sm.getService("a")?.status).toBe("running");
+
+    sm.beginShutdown();
+    await sm.restartService("a");
+    await tick();
+
+    // Restart's stop half must not be followed by a start: only the one
+    // original spawn ever happened.
+    expect(
+      spawnedProcesses.filter((p) => p.spawnArgs?.cmd === "a"),
+    ).toHaveLength(1);
+  });
+});
+
 // --- beforeStart hook -------------------------------------------------------
 
 describe("ServiceManager — beforeStart hook", () => {

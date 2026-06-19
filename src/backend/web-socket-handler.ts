@@ -64,6 +64,14 @@ export class WebSocketHandler {
     };
     this.logger.info("WS RCV:", data);
 
+    // The server is shutting down (stop()): reject every action so a late frame
+    // can't start, restart, or otherwise touch services as they're torn down.
+    // The shutdown stops services through the manager directly, not via here.
+    if (this.serviceManager.isShuttingDown()) {
+      this.sendError(ws, "Dashboard is shutting down.");
+      return;
+    }
+
     // Global actions that don't target a specific service.
     if (action === "start_all") {
       await this.serviceManager.startAllServices();

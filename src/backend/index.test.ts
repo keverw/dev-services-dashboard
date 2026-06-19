@@ -123,6 +123,37 @@ describe("Dev Services Dashboard", () => {
 
       await server.stop();
     });
+
+    it("returns 304 when the client ETag matches", async () => {
+      const server = await startDevServicesDashboard(testConfig);
+
+      // First request: grab the served ETag.
+      const first = await fetch(`http://localhost:${server.port}/`);
+      expect(first.status).toBe(200);
+      const etag = first.headers.get("etag");
+      expect(etag).toBeTruthy();
+
+      // Second request with that ETag: the VFS middleware short-circuits to 304.
+      const second = await fetch(`http://localhost:${server.port}/`, {
+        headers: { "If-None-Match": etag! },
+      });
+      expect(second.status).toBe(304);
+
+      await server.stop();
+    });
+
+    it("ignores non-GET/HEAD requests in the VFS (404 via fall-through)", async () => {
+      const server = await startDevServicesDashboard(testConfig);
+
+      // A POST isn't served from the VFS, so the request falls through to the
+      // not-found handler rather than returning the index page.
+      const response = await fetch(`http://localhost:${server.port}/`, {
+        method: "POST",
+      });
+      expect(response.status).toBe(404);
+
+      await server.stop();
+    });
   });
 
   describe("WebSocket Handler", () => {
@@ -444,6 +475,29 @@ describe("Dev Services Dashboard", () => {
       await expect(startDevServicesDashboard(invalidConfig)).rejects.toThrow(
         /empty or invalid command/,
       );
+    });
+
+    it("rejects when the server fails to bind", async () => {
+      // Binding to an address that isn't a local interface fails asynchronously
+      // with EADDRNOTAVAIL, which the `listen` error handler turns into a
+      // rejected start (covers the failed-bind path). A same-port collision
+      // can't be used here: Bun enables SO_REUSEPORT, so two listeners on one
+      // port both bind successfully.
+      const port = await getPort();
+
+      let rejected = false;
+      try {
+        const server = await startDevServicesDashboard({
+          ...testConfig,
+          port,
+          hostname: "192.0.2.1", // TEST-NET-1: routable syntax, not a local NIC
+        });
+        await server.stop(); // unexpected: clean up if it somehow bound
+      } catch {
+        rejected = true;
+      }
+
+      expect(rejected).toBe(true);
     });
 
     it("should handle malformed WebSocket messages", async () => {

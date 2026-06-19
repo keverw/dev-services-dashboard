@@ -16,6 +16,7 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
   - [Quick Setup](#quick-setup)
   - [Configuration Options](#configuration-options)
     - [Return Value](#return-value)
+    - [Shutting Down](#shutting-down)
   - [Service Configuration](#service-configuration)
     - [Web Links](#web-links)
     - [Custom Signals](#custom-signals)
@@ -54,7 +55,7 @@ Perfect for local development where you need to run multiple interdependent serv
 
 ## Features
 
-- **Real-time Logs**: View service logs as they happen. ANSI escape sequences (CSI and OSC) — color/style as well as cursor moves and clear-line/clear-screen "spam" are stripped, since logs are rendered as plain text
+- **Real-time Logs**: View service logs as they happen. ANSI escape sequences (CSI and OSC), color/style as well as cursor moves and clear-line/clear-screen "spam" are stripped, since logs are rendered as plain text
 - **Log Management**: Clear a service's log buffer from the UI ("Clear Logs"). This clears it on the server and for all connected clients (a single `Log buffer cleared by user.` system line is then written in its place)
 - **Service Controls**: Start, stop, restart services individually or all at once ("Start All" / "Stop All")
 - **Status Monitoring**: Visual indicators for service status
@@ -107,7 +108,7 @@ Perfect for local development where you need to run multiple interdependent serv
      },
    ];
 
-   startDevServicesDashboard({
+   const dashboard = await startDevServicesDashboard({
      dashboardName: "My Project Dashboard",
      port: 4000,
      hostname: "localhost",
@@ -118,6 +119,13 @@ Perfect for local development where you need to run multiple interdependent serv
    });
 
    console.log("Dev Services Dashboard Started!");
+
+   // The library installs no signal handlers, so wire up your own shutdown.
+   // (See "Shutting Down" below for the full pattern, including double-Ctrl+C.)
+   process.on("SIGINT", async () => {
+     await dashboard.stop(); // stop all services, then close the server
+     process.exit(0);
+   });
    ```
 
 3. **Add a script to your `package.json`:**
@@ -172,7 +180,7 @@ The `startDevServicesDashboard` function accepts a configuration object with the
 
 #### Return Value
 
-`startDevServicesDashboard` is **async**. It returns a `Promise<DevUIServer>` that resolves once the HTTP server is listening (and rejects if it fails to bind, e.g. the port is in use). The examples in this README call it fire-and-forget for brevity, but for clean error handling and programmatic shutdown you'll usually want to `await` it:
+`startDevServicesDashboard` is **async**. It returns a `Promise<DevUIServer>` that resolves once the HTTP server is listening, and rejects if it fails to bind (e.g. the port is in use). Always `await` it (or `.catch()` it), since otherwise a bind failure surfaces as an unhandled promise rejection. You'll want the resolved server anyway, both for clean shutdown via `stop()` and to wire up your own signal handling (see below):
 
 ```typescript
 const dashboard = await startDevServicesDashboard({ services });
@@ -204,7 +212,34 @@ A service is always in exactly one `ServiceStatusValue` state:
 | `error`        | A start failed because a hook threw or timed out, or the process exited non-zero with a "normal" code (any code `1`–`127`). Also the fallback for an exit that reports neither a code nor a signal (an unexpected exit)                                                                                                                                                                                                                                                                                                                        |
 | `crashed`      | The process died abnormally because it was killed by a signal other than `SIGTERM`/`SIGINT` (a crash signal like `SIGSEGV`, or a custom signal the process didn't handle, see [Custom Signals](#custom-signals)), exited with a code ≥ `128`, or was force-killed (`SIGKILL`) from _outside_ the dashboard while running. (A dashboard-initiated stop that escalates to `SIGKILL` settles as `stopped`, and a start that times out and is torn down settles as `error`, so you only see `crashed` from a `SIGKILL` the dashboard didn't send.) |
 
-If you don't `await` (or `.catch()`) the promise, a bind failure surfaces as an unhandled promise rejection. The dashboard also installs `SIGINT`/`SIGTERM` handlers that stop all services and exit, so `Ctrl+C` shuts things down cleanly without calling `stop()` yourself.
+#### Shutting Down
+
+The dashboard does **not** install any `SIGINT`/`SIGTERM` handlers or call `process.exit()` on its own. As a library it leaves process lifecycle to you, so a bare `Ctrl+C` will exit your script **without** stopping the running services (leaving them holding their ports). To shut down cleanly, keep the resolved server and call `stop()` (which stops all services, then closes the server) from your own signal handler:
+
+```typescript
+const dashboard = await startDevServicesDashboard({ services });
+
+let isShuttingDown = false;
+const shutdown = async (signal: NodeJS.Signals) => {
+  // A second Ctrl+C while the graceful stop is still running forces an exit.
+  if (isShuttingDown) process.exit(1);
+  isShuttingDown = true;
+
+  console.log(`\nReceived ${signal}, shutting down…`);
+  try {
+    await dashboard.stop(); // stop all services, then close the server
+    process.exit(0);
+  } catch (err) {
+    console.error("Error during shutdown:", err);
+    process.exit(1);
+  }
+};
+
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+```
+
+`stop()` is best-effort and resolves rather than rejecting: a service that fails to stop is logged via your `logger` (not thrown), and server-close errors are swallowed. It terminates any live WebSocket clients and then awaits the WebSocket and HTTP servers closing, so a resolved `stop()` normally means they've drained, but each close is bounded by a short internal deadline, so a runtime that doesn't fire its close callback (e.g. Bun after a WebSocket upgrade) can't hang shutdown. The `try/catch` above is therefore just defensive hygiene. Keep it if you might add other shutdown steps, or drop it.
 
 ### Service Configuration
 
@@ -515,7 +550,7 @@ const services: UserServiceConfig[] = [
   },
 ];
 
-startDevServicesDashboard({
+const dashboard = await startDevServicesDashboard({
   port: 4000,
   hostname: "localhost",
   maxLogLines: 200,
@@ -523,6 +558,26 @@ startDevServicesDashboard({
 });
 
 console.log("Dev Services Dashboard started");
+
+// The library installs no signal handlers, so own shutdown yourself.
+let isShuttingDown = false;
+const shutdown = async (signal: NodeJS.Signals) => {
+  // A second Ctrl+C while the graceful stop is still running forces an exit.
+  if (isShuttingDown) process.exit(1);
+  isShuttingDown = true;
+
+  console.log(`\nReceived ${signal}, shutting down…`);
+  try {
+    await dashboard.stop(); // stop all services, then close the server
+    process.exit(0);
+  } catch (err) {
+    console.error("Error during shutdown:", err);
+    process.exit(1);
+  }
+};
+
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
 ```
 
 ## Demo

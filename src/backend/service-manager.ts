@@ -135,6 +135,18 @@ export class ServiceManager {
   // service and wrongly tear it down).
   private inFlightStarts = new Map<string, Promise<boolean>>();
   private startAllInProgress = false;
+  // Latched true when the dashboard server begins shutting down (DevUIServer
+  // stop()). Once set, every start path refuses, so neither a late client
+  // action nor an in-flight `startAndWait` waiter can resurrect a service after
+  // shutdown has already stopped it — a resurrected process would leak, since
+  // the closing server no longer manages it. Stop paths are unaffected (the
+  // shutdown itself drives them through stopService/stopAllServices).
+  //
+  // This is terminal and never cleared: stop() closes the server, so this
+  // ServiceManager instance is done. Running again means a fresh
+  // startDevServicesDashboard() call, which builds a new ServiceManager with
+  // shuttingDown = false.
+  private shuttingDown = false;
 
   constructor(
     logger: Logger,
@@ -277,6 +289,20 @@ export class ServiceManager {
     return this.services;
   }
 
+  /**
+   * Latches the manager into shutdown so every start/restart/start-all path
+   * refuses from here on. Called by the dashboard server's `stop()` before it
+   * stops the services, so nothing can resurrect a service mid-shutdown.
+   */
+  beginShutdown(): void {
+    this.shuttingDown = true;
+  }
+
+  /** Whether `beginShutdown` has been called (the server is stopping). */
+  isShuttingDown(): boolean {
+    return this.shuttingDown;
+  }
+
   getService(serviceID: string): Service | undefined {
     return this.services.find((s) => s.id === serviceID);
   }
@@ -369,6 +395,10 @@ export class ServiceManager {
   }
 
   async startService(serviceID: string) {
+    // The server is shutting down; never spawn (or respawn, via a waiter) a
+    // service that the shutdown has stopped or is about to stop.
+    if (this.shuttingDown) return;
+
     const service = this.getService(serviceID);
     if (
       !service ||
@@ -1067,6 +1097,9 @@ export class ServiceManager {
   }
 
   async restartService(serviceID: string) {
+    // Restart would stop then start; during shutdown the start half must not run.
+    if (this.shuttingDown) return;
+
     const service = this.getService(serviceID);
     if (!service) return;
 
@@ -1259,6 +1292,10 @@ export class ServiceManager {
    * of arming a second timer. See `inFlightStarts`.
    */
   startAndWait(serviceID: string): Promise<boolean> {
+    // Refuse to begin a (timeout-aware) start once the server is shutting down;
+    // report it as a failed start so any caller (e.g. Start All) moves on.
+    if (this.shuttingDown) return Promise.resolve(false);
+
     const existing = this.inFlightStarts.get(serviceID);
     if (existing) return existing;
 
@@ -1396,7 +1433,7 @@ export class ServiceManager {
    * can render it without orchestrating anything themselves.
    */
   async startAllServices(): Promise<void> {
-    if (this.startAllInProgress) return;
+    if (this.shuttingDown || this.startAllInProgress) return;
     this.startAllInProgress = true;
 
     const total = this.services.length;

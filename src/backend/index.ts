@@ -11,54 +11,36 @@ import { HttpHandler } from "./http-handler";
 import { createServer } from "http";
 import { WebSocketHandler } from "./web-socket-handler";
 
-// Module-level shutdown registry so multiple startDevServicesDashboard calls in
-// a single process share ONE pair of SIGINT/SIGTERM handlers instead of each
-// stacking its own (N handlers all racing to call process.exit). Each instance
-// registers its own shutdown routine; the shared handler runs them all, then
-// exits once. stop() unregisters, and the process listeners are removed once the
-// last dashboard is gone so stop() fully detaches the dashboard from the process.
-const activeShutdowns = new Set<(signal: string) => Promise<void>>();
-let processSignalsInstalled = false;
-let shuttingDown = false;
+// How long stop() waits for each server's close() callback before giving up.
+// On Node the close resolves effectively instantly, so this deadline only bites
+// on runtimes that don't fire the callback after a WebSocket upgrade has
+// occurred (e.g. Bun), where it keeps shutdown from hanging. Kept short so a
+// Ctrl+C feels snappy there; localhost servers drain well under this on Node.
+const STOP_CLOSE_DEADLINE_MS = 500;
 
-const handleProcessSignal = (signal: string) => {
-  // A second signal while a shutdown is already in flight forces an immediate
-  // exit rather than running every instance's shutdown again concurrently — so
-  // the user can always get out, even if a shutdown is slow.
-  if (shuttingDown) {
-    process.exit(1);
-  }
-  shuttingDown = true;
+// Awaits a server `close()` but resolves after `deadlineMs` regardless, so a
+// runtime that never invokes the close callback can't hang shutdown. Close
+// errors are swallowed (resolve, not reject): the common one is
+// `ERR_SERVER_NOT_RUNNING` when the server is already closed (e.g. closing the
+// `ws` server first tears down the shared HTTP server on some runtimes), which
+// is a benign no-op — stop() is best-effort and shouldn't reject on it.
+function closeServerWithDeadline(
+  close: (cb: (err?: Error) => void) => void,
+  deadlineMs: number,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
 
-  void (async () => {
-    // `allSettled`, not `all`: if one instance's shutdown rejects (e.g. a close
-    // throws), we must still reach `process.exit(0)`. With `all`, a rejection
-    // would skip the exit and leave the process alive after Ctrl+C (and surface
-    // as an unhandled rejection).
-    await Promise.allSettled([...activeShutdowns].map((fn) => fn(signal)));
-    process.exit(0);
-  })();
-};
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
 
-const sigintListener = () => handleProcessSignal("SIGINT");
-const sigtermListener = () => handleProcessSignal("SIGTERM");
-
-function registerShutdown(fn: (signal: string) => Promise<void>): void {
-  activeShutdowns.add(fn);
-  if (!processSignalsInstalled) {
-    processSignalsInstalled = true;
-    process.on("SIGINT", sigintListener);
-    process.on("SIGTERM", sigtermListener);
-  }
-}
-
-function unregisterShutdown(fn: (signal: string) => Promise<void>): void {
-  activeShutdowns.delete(fn);
-  if (activeShutdowns.size === 0 && processSignalsInstalled) {
-    processSignalsInstalled = false;
-    process.removeListener("SIGINT", sigintListener);
-    process.removeListener("SIGTERM", sigtermListener);
-  }
+    const timer = setTimeout(finish, deadlineMs);
+    close(() => finish());
+  });
 }
 
 // --- Main export function ---
@@ -123,77 +105,84 @@ export function startDevServicesDashboard(
         httpHandler.handleRequest(req, res);
       });
 
-      // Create WebSocket server
-      wsServer = new WebSocketServer({ server: httpServer });
-      const wsHandler = new WebSocketHandler(logger, serviceManager);
-
-      wsServer.on("connection", (ws) => {
-        wsHandler.handleConnection(ws);
-      });
-
-      // Per-instance shutdown routine, registered into the shared process-signal
-      // handler (which exits once after running every active dashboard's). This
-      // stops services and closes this instance's server but does NOT exit — the
-      // shared handler owns process.exit so multiple dashboards don't race it.
-      const shutdown = async (signal: string) => {
-        logger.info(
-          `Received ${signal}. Shutting down Dev Services Dashboard server and services...`,
-        );
-
-        await serviceManager.stopAllServices();
-
-        logger.info("Stopping Dev Services Dashboard HTTP server...");
-        httpServer.close();
-        wsServer.close();
-      };
-
-      registerShutdown(shutdown);
-
       // Tracks whether the start promise has settled, so the `error` handler can
-      // tell a failed bind (reject + detach this instance) from a later runtime
-      // error on an already-running server (just log it).
+      // tell a failed bind (reject) from a later runtime error on an
+      // already-running server (just log it).
       let settled = false;
 
-      // Start server
+      // Attach the error handler BEFORE listen(): some runtimes (e.g. Bun)
+      // attempt the bind synchronously and emit `error` during the listen() call
+      // itself, so a handler registered afterwards would miss it and the bind
+      // failure would surface as an unhandled `error` event.
+      httpServer.on("error", (error) => {
+        if (settled) {
+          // The server already came up; this is a later runtime error on an
+          // already-running server — just log it.
+          logger.error("Dev Services Dashboard server error:", error as object);
+          return;
+        }
+
+        // The instance never came up — reject the start promise.
+        settled = true;
+        logger.error(
+          "Fatal error starting Dev Services Dashboard server:",
+          error as object,
+        );
+        reject(error);
+      });
+
+      // Start server. The WebSocket server is attached only AFTER the HTTP
+      // server is actually listening: a `WebSocketServer({ server })` registers
+      // its own `error` listener on the HTTP server, and on a failed bind that
+      // listener throws (the ws server has no `error` handler), which both
+      // pre-empts our handler above and surfaces as an uncaught exception. By
+      // wiring it up inside the listen callback, the bind window stays clean so
+      // a bind failure rejects the start promise instead of crashing the process.
       httpServer.listen(PORT, HOSTNAME, () => {
         settled = true;
         logger.info(
           `Dev Services Dashboard server running on http://${HOSTNAME}:${PORT}`,
         );
 
+        wsServer = new WebSocketServer({ server: httpServer });
+        const wsHandler = new WebSocketHandler(logger, serviceManager);
+        wsServer.on("connection", (ws) => {
+          wsHandler.handleConnection(ws);
+        });
+
         resolve({
           httpServer,
           wsServer,
           port: PORT,
           stop: async () => {
-            // Detach this instance from the shared process-signal handler.
-            unregisterShutdown(shutdown);
-
+            // Latch shutdown first so no client action (or in-flight start
+            // waiter) can resurrect a service while/after we stop them.
+            serviceManager.beginShutdown();
             await serviceManager.stopAllServices();
-            httpServer.close();
-            wsServer.close();
+
+            // Terminate live WebSocket clients first: otherwise wsServer.close()
+            // waits on them, and their still-open sockets keep the HTTP server
+            // alive so its close() can't complete.
+            for (const client of wsServer.clients) client.terminate();
+
+            // Await each close so a resolved stop() means the servers have
+            // actually drained — but bound the wait (see STOP_CLOSE_DEADLINE_MS)
+            // so a runtime that doesn't fire the close callback after a
+            // WebSocket upgrade (e.g. Bun) can't hang shutdown.
+            await closeServerWithDeadline(
+              (cb) => wsServer.close(cb),
+              STOP_CLOSE_DEADLINE_MS,
+            );
+
+            // Drop idle keep-alive HTTP sockets so close() can finish promptly
+            // on runtimes that support it.
+            httpServer.closeAllConnections?.();
+            await closeServerWithDeadline(
+              (cb) => httpServer.close(cb),
+              STOP_CLOSE_DEADLINE_MS,
+            );
           },
         });
-      });
-
-      httpServer.on("error", (error) => {
-        if (settled) {
-          // The server already came up; this is a later runtime error. Do NOT
-          // detach this still-running instance from the shutdown registry (that
-          // would silently break Ctrl+C for it) — just log it.
-          logger.error("Dev Services Dashboard server error:", error as object);
-          return;
-        }
-
-        // The instance never came up — detach it so a failed bind doesn't leave
-        // a registered shutdown (and a stray process-signal handler) behind.
-        settled = true;
-        unregisterShutdown(shutdown);
-        logger.error(
-          "Fatal error starting Dev Services Dashboard server:",
-          error as object,
-        );
-        reject(error);
       });
     } catch (error) {
       logger.error(
