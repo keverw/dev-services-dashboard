@@ -19,10 +19,23 @@ import { WebSocketHandler } from "./web-socket-handler";
 // last dashboard is gone so stop() fully detaches the dashboard from the process.
 const activeShutdowns = new Set<(signal: string) => Promise<void>>();
 let processSignalsInstalled = false;
+let shuttingDown = false;
 
 const handleProcessSignal = (signal: string) => {
+  // A second signal while a shutdown is already in flight forces an immediate
+  // exit rather than running every instance's shutdown again concurrently — so
+  // the user can always get out, even if a shutdown is slow.
+  if (shuttingDown) {
+    process.exit(1);
+  }
+  shuttingDown = true;
+
   void (async () => {
-    await Promise.all([...activeShutdowns].map((fn) => fn(signal)));
+    // `allSettled`, not `all`: if one instance's shutdown rejects (e.g. a close
+    // throws), we must still reach `process.exit(0)`. With `all`, a rejection
+    // would skip the exit and leave the process alive after Ctrl+C (and surface
+    // as an unhandled rejection).
+    await Promise.allSettled([...activeShutdowns].map((fn) => fn(signal)));
     process.exit(0);
   })();
 };
@@ -136,8 +149,14 @@ export function startDevServicesDashboard(
 
       registerShutdown(shutdown);
 
+      // Tracks whether the start promise has settled, so the `error` handler can
+      // tell a failed bind (reject + detach this instance) from a later runtime
+      // error on an already-running server (just log it).
+      let settled = false;
+
       // Start server
       httpServer.listen(PORT, HOSTNAME, () => {
+        settled = true;
         logger.info(
           `Dev Services Dashboard server running on http://${HOSTNAME}:${PORT}`,
         );
@@ -158,8 +177,20 @@ export function startDevServicesDashboard(
       });
 
       httpServer.on("error", (error) => {
+        if (settled) {
+          // The server already came up; this is a later runtime error. Do NOT
+          // detach this still-running instance from the shutdown registry (that
+          // would silently break Ctrl+C for it) — just log it.
+          logger.error(
+            "Dev Services Dashboard server error:",
+            error as object,
+          );
+          return;
+        }
+
         // The instance never came up — detach it so a failed bind doesn't leave
         // a registered shutdown (and a stray process-signal handler) behind.
+        settled = true;
         unregisterShutdown(shutdown);
         logger.error(
           "Fatal error starting Dev Services Dashboard server:",
