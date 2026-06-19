@@ -45,7 +45,7 @@
   "author": "Kevin Whitman (https://github.com/keverw)",
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "repository": {
     "type": "git",
