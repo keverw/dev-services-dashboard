@@ -75,6 +75,23 @@ export class WebSocketHandler {
       return;
     }
 
+    // Validate the action before the serviceID so an unrecognized action always
+    // reports "Unknown action" rather than being masked by an "Invalid serviceID"
+    // error when the frame also lacks a valid serviceID.
+    const serviceActions = [
+      "start",
+      "stop",
+      "restart",
+      "clear_logs",
+      "send_signal",
+    ];
+
+    if (!serviceActions.includes(action)) {
+      this.logger.warn(`Unknown action: ${action}`);
+      this.sendError(ws, `Unknown action: ${action}`);
+      return;
+    }
+
     if (!this.serviceManager.getService(serviceID)) {
       this.logger.error(`Invalid serviceID: ${serviceID}`);
       this.sendError(ws, `Invalid serviceID: ${serviceID}`);
@@ -109,9 +126,6 @@ export class WebSocketHandler {
         this.serviceManager.sendSignal(serviceID, signal);
         break;
       }
-      default:
-        this.logger.warn(`Unknown action: ${action}`);
-        this.sendError(ws, `Unknown action: ${action}`);
     }
   }
 
