@@ -53,6 +53,7 @@
   },
   "devDependencies": {
     "@eslint/compat": "^2.1.0",
+    "@eslint/js": "^10.0.1",
     "@types/bun": "^1.2.13",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^20.10.0",
