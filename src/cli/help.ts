@@ -79,11 +79,17 @@ export const COMMANDS: CommandSpec[] = [
     name: "logs",
     aliases: [],
     args: "<service>",
-    summary: "Print buffered log lines for a service (newest last).",
+    summary:
+      "Print buffered log lines for a service (newest last), or stream them with --follow.",
     flags: [
       {
+        name: "-f, --follow",
+        summary:
+          "Stream new lines as they arrive (Ctrl+C to stop). Replays the last 10 lines first, or -n of them. Under --json this emits NDJSON, one entry per line.",
+      },
+      {
         name: "-n, --lines <n>",
-        summary: "How many lines to show (default 100).",
+        summary: "How many lines to show (default 100, or 10 with --follow).",
       },
       {
         name: "--type <types>",

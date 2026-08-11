@@ -35,6 +35,7 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
   - [How it fits together](#how-it-fits-together)
   - [Connecting](#connecting)
   - [Commands](#commands)
+  - [Following logs](#following-logs)
   - [Exit codes](#exit-codes)
   - [HTTP control API](#http-control-api)
   - [Security](#security)
@@ -679,19 +680,41 @@ The dashboard URL is resolved in this order:
 | `dsd restart <service>`           | Restart it and wait for it to come back up                                     |
 | `dsd start-all` / `dsd stop-all`  | Start/stop everything in (reverse) dependency order                            |
 | `dsd logs <service>`              | Buffered log lines, newest last                                                |
+| `dsd logs <service> -f`           | Stream new lines as they arrive (Ctrl+C to stop)                               |
 | `dsd clear-logs <service>`        | Clear a service's log buffer                                                   |
 | `dsd signal <service> <SIGNAL>`   | Send a signal the service declares in `signals`                                |
 | `dsd health` (`ping`)             | Check a dashboard is reachable                                                 |
 | `dsd help [<command>]`            | Help; `dsd help --json` emits the full machine-readable manifest               |
 
-Useful flags: `--json` (machine-readable output), `--lines <n>`, `--type stdout,stderr,system`, `--since <epoch-ms>`, `--plain` (bare log lines, no timestamp prefix), `--no-wait`, `--timeout <ms>`, `--no-color`.
+Useful flags: `--json` (machine-readable output), `-f`/`--follow`, `--lines <n>`, `--type stdout,stderr,system`, `--since <epoch-ms>`, `--plain` (bare log lines, no timestamp prefix), `--no-wait`, `--timeout <ms>`, `--no-color`.
 
 ```bash
 dsd status
 dsd logs api --lines 50 --type stderr
+dsd logs api -f
 dsd restart api && dsd status api
 dsd signal api SIGHUP
 ```
+
+### Following logs
+
+`dsd logs <service> -f` streams new lines as they arrive, like `tail -f`. It replays the last 10 buffered lines first (or `-n <count>` of them), then stays connected until you Ctrl+C.
+
+```bash
+dsd logs api -f                  # follow
+dsd logs api -f -n 50            # replay 50 lines, then follow
+dsd logs api -f --type stderr    # errors only
+dsd logs api -f --json           # NDJSON: one JSON object per line
+```
+
+This is the one command that uses the dashboard's WebSocket rather than the HTTP API — the server already broadcasts every log line to connected clients, so following is just a matter of listening, and the opening frame carries the buffered tail.
+
+A few details worth knowing:
+
+- Only log lines go to **stdout**. Status changes ("api is now crashed") and notices go to **stderr**, so `dsd logs api -f | grep ERROR` sees log output only.
+- Under `--json` the output is **NDJSON** — one object per line, not a JSON array — so a consumer can read it incrementally instead of waiting for a document that never ends.
+- Ctrl+C exits `0`. If the dashboard goes away mid-follow, it exits `5` (unreachable) rather than pretending the stream ended normally.
+- `--since` is a query against the stored buffer, so it can't be combined with `--follow`.
 
 ### Exit codes
 
@@ -770,6 +793,9 @@ Control them with the `dsd` CLI (add `--json` for machine-readable output):
 - `dsd logs <service> --lines 50` — recent output
 - `dsd restart <service>` — restart after changing its code
 - `dsd status <service> --check` — exit 0 only if it is running
+
+Prefer `--lines` over `dsd logs -f`: follow runs until interrupted, so only use
+it with a timeout (e.g. `timeout 10 dsd logs api -f`).
 
 Exit codes: 0 ok, 2 usage, 3 failed, 4 no such service, 5 dashboard unreachable.
 Run `dsd help --json` for the full command manifest.
@@ -880,6 +906,6 @@ If you're consuming frames yourself, the server also emits an `error_from_server
 ## Future Goals
 
 - **Headless Mode**: An [HTTP control API and CLI](#cli--control-api) now cover the scripting/integration half of this. What's still open is a `serveUI: false` option to run the dashboard without serving the web interface at all
-- **Follow mode for logs**: `dsd logs -f` to stream new lines as they arrive (likely via Server-Sent Events, so plain `curl -N` works too). Today the CLI reads the buffer with `--lines`/`--since`
+- **Streaming logs over plain HTTP**: `dsd logs -f` streams over the dashboard's WebSocket. A Server-Sent Events endpoint would let `curl -N` follow logs too, without a WebSocket client
 - **Writing to a service's stdin**: services are spawned with stdin closed (`"ignore"`), so there's no way to type into a running process. Enabling it needs an opt-in per-service flag, a write path through the manager, and API/UI surface — interactive prompts would additionally need a pty
 - **Authentication & Security**: Currently designed for local development environments without authentication. Future versions could include optional authentication mechanisms for team environments or remote access scenarios

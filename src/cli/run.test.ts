@@ -368,3 +368,213 @@ describe("CLI", () => {
     });
   });
 });
+
+describe("CLI logs --follow", () => {
+  let server: DevUIServer;
+  let url: string;
+  let port: number;
+
+  beforeEach(async () => {
+    port = await freePort();
+    url = `http://127.0.0.1:${port}`;
+    server = await startDevServicesDashboard({
+      port,
+      hostname: "127.0.0.1",
+      maxLogLines: 50,
+      dashboardName: "Follow Test",
+      services: [{ id: "api", name: "API Server", command: ["node", "x.js"] }],
+    });
+  });
+
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  /**
+   * Runs a follow, then aborts it once `until` is satisfied (or a deadline
+   * passes), so a streaming command can be asserted on without hanging.
+   */
+  async function follow(args: string[], until: (stdout: string) => boolean) {
+    const controller = new AbortController();
+    let stdout = "";
+    let stderr = "";
+
+    const done = run(["--url", url, ...args], {
+      stdout: (t) => {
+        stdout += t;
+      },
+      stderr: (t) => {
+        stderr += t;
+      },
+      env: { NO_COLOR: "1" },
+      isTTY: false,
+      version: "9.9.9-test",
+      signal: controller.signal,
+    });
+
+    const deadline = Date.now() + 3000;
+    while (!until(stdout) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    controller.abort();
+
+    return { code: await done, stdout, stderr };
+  }
+
+  it("replays the buffered tail and exits 0 when aborted", async () => {
+    await run(["--url", url, "start", "api"], {
+      stdout: () => {},
+      stderr: () => {},
+      env: {},
+      isTTY: false,
+      version: "9.9.9-test",
+    });
+
+    const { code, stdout } = await follow(["logs", "api", "--follow"], (out) =>
+      out.includes("started successfully"),
+    );
+
+    expect(code).toBe(EXIT.OK);
+    expect(stdout).toContain("started successfully");
+  });
+
+  it("streams lines that arrive after it connects", async () => {
+    // Nothing is buffered yet, so anything that shows up must have been pushed
+    // live over the socket. Trigger the start once the follow is connected.
+    setTimeout(() => {
+      void run(["--url", url, "start", "api"], {
+        stdout: () => {},
+        stderr: () => {},
+        env: {},
+        isTTY: false,
+        version: "9.9.9-test",
+      });
+    }, 200);
+
+    const { code, stdout } = await follow(["logs", "api", "--follow"], (out) =>
+      out.includes("Attempting to start"),
+    );
+
+    expect(code).toBe(EXIT.OK);
+    expect(stdout).toContain("Attempting to start");
+  });
+
+  it("emits NDJSON under --json, one entry per line", async () => {
+    await run(["--url", url, "start", "api"], {
+      stdout: () => {},
+      stderr: () => {},
+      env: {},
+      isTTY: false,
+      version: "9.9.9-test",
+    });
+
+    const { stdout } = await follow(
+      ["logs", "api", "--follow", "--json"],
+      (out) => out.split("\n").filter(Boolean).length > 0,
+    );
+
+    const lines = stdout.split("\n").filter(Boolean);
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      const entry = JSON.parse(line);
+      expect(typeof entry.timestamp).toBe("number");
+      expect(["stdout", "stderr", "system"]).toContain(entry.logType);
+    }
+  });
+
+  it("exits 4 when following an unknown service", async () => {
+    const { code, stderr } = await follow(
+      ["logs", "nope", "--follow"],
+      () => false,
+    );
+    expect(code).toBe(EXIT.NO_SERVICE);
+    expect(stderr).toContain("nope");
+  });
+
+  it("exits 5 when the dashboard is not reachable", async () => {
+    const controller = new AbortController();
+    let stderr = "";
+    const code = await run(
+      ["--url", "http://127.0.0.1:1", "logs", "api", "-f"],
+      {
+        stdout: () => {},
+        stderr: (t) => {
+          stderr += t;
+        },
+        env: {},
+        isTTY: false,
+        version: "9.9.9-test",
+        signal: controller.signal,
+      },
+    );
+
+    expect(code).toBe(EXIT.UNREACHABLE);
+    expect(stderr.length).toBeGreaterThan(0);
+  });
+
+  it("exits 5 when the dashboard goes away mid-follow", async () => {
+    const controller = new AbortController();
+    let stdout = "";
+    const done = run(["--url", url, "logs", "api", "-f"], {
+      stdout: (t) => {
+        stdout += t;
+      },
+      stderr: () => {},
+      env: { NO_COLOR: "1" },
+      isTTY: false,
+      version: "9.9.9-test",
+      signal: controller.signal,
+    });
+
+    // Let the socket connect and take the initial_state frame.
+    await new Promise((r) => setTimeout(r, 150));
+    await server.stop();
+
+    expect(await done).toBe(EXIT.UNREACHABLE);
+    void stdout;
+
+    // afterEach stops it again; stop() is safe to call twice.
+  });
+
+  it("rejects --since together with --follow", async () => {
+    const controller = new AbortController();
+    let stderr = "";
+    const code = await run(
+      ["--url", url, "logs", "api", "-f", "--since", "123"],
+      {
+        stdout: () => {},
+        stderr: (t) => {
+          stderr += t;
+        },
+        env: {},
+        isTTY: false,
+        version: "9.9.9-test",
+        signal: controller.signal,
+      },
+    );
+
+    expect(code).toBe(EXIT.USAGE);
+    expect(stderr).toContain("--since");
+  });
+
+  it("rejects an unknown --type", async () => {
+    const controller = new AbortController();
+    let stderr = "";
+    const code = await run(
+      ["--url", url, "logs", "api", "-f", "--type", "banana"],
+      {
+        stdout: () => {},
+        stderr: (t) => {
+          stderr += t;
+        },
+        env: {},
+        isTTY: false,
+        version: "9.9.9-test",
+        signal: controller.signal,
+      },
+    );
+
+    expect(code).toBe(EXIT.USAGE);
+    expect(stderr).toContain("--type");
+  });
+});

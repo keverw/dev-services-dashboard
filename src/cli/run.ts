@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import type { LogEntry } from "@shared/protocol";
 import type {
   ClearLogsResponse,
   HealthResponse,
@@ -29,6 +30,7 @@ import {
   helpManifest,
   rootHelp,
 } from "./help";
+import { followLogs } from "./follow";
 
 export interface CliIO {
   stdout: (text: string) => void;
@@ -36,11 +38,18 @@ export interface CliIO {
   env: Record<string, string | undefined>;
   isTTY: boolean;
   version: string;
+  /**
+   * Stops a long-running command (today, `logs --follow`). `bin.ts` wires this
+   * to SIGINT; tests use it to end a follow deterministically.
+   */
+  signal?: AbortSignal;
 }
 
 /** Commands whose server side can legitimately block for a long time. */
 const SLOW_COMMANDS = new Set(["start", "restart", "start-all", "stop-all"]);
 const DEFAULT_TIMEOUT_MS = 15_000;
+/** Buffered lines replayed before `logs --follow` switches to live output. */
+const DEFAULT_FOLLOW_LINES = 10;
 
 /**
  * The whole CLI, as a function.
@@ -82,6 +91,7 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
       check: { type: "boolean", default: false },
       "no-wait": { type: "boolean", default: false },
       plain: { type: "boolean", default: false },
+      follow: { type: "boolean", short: "f", default: false },
       lines: { type: "string", short: "n" },
       type: { type: "string" },
       since: { type: "string" },
@@ -152,10 +162,8 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
     return EXIT.USAGE;
   }
 
-  const client = new ApiClient({
-    baseURL: resolveURL(values.url, io.env),
-    timeoutMs,
-  });
+  const baseURL = resolveURL(values.url, io.env);
+  const client = new ApiClient({ baseURL, timeoutMs });
 
   // Drop the command itself, so a handler's `positionals[0]` is its first real
   // argument (a service id for most commands).
@@ -164,6 +172,7 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
     json,
     color,
     client,
+    baseURL,
     positionals: positionals.slice(1),
     values,
   };
@@ -200,6 +209,8 @@ interface Ctx {
   json: boolean;
   color: Colorize;
   client: ApiClient;
+  /** The resolved dashboard URL; `logs --follow` derives its ws:// URL from it. */
+  baseURL: string;
   positionals: string[];
   values: Record<string, unknown>;
 }
@@ -375,17 +386,65 @@ async function commandStopAll(ctx: Ctx): Promise<number> {
   return failed > 0 ? EXIT.FAILED : EXIT.OK;
 }
 
+/** Parses `--type stdout,stderr` into a set; an empty set means "all". */
+function parseLogTypes(raw: unknown): Set<LogEntry["logType"]> | null {
+  const types = new Set<LogEntry["logType"]>();
+  if (raw === undefined) return types;
+
+  for (const part of String(raw).split(",")) {
+    const value = part.trim();
+    if (value === "") continue;
+    if (value !== "stdout" && value !== "stderr" && value !== "system") {
+      return null;
+    }
+    types.add(value);
+  }
+  return types;
+}
+
 async function commandLogs(ctx: Ctx): Promise<number> {
   const id = requireService(ctx);
   if (!id) return EXIT.USAGE;
 
-  const params = new URLSearchParams();
-  if (ctx.values.lines !== undefined) {
-    const lines = Number(ctx.values.lines);
-    if (!Number.isInteger(lines) || lines < 0) {
-      ctx.io.stderr("dsd: --lines must be a non-negative integer.\n");
+  const lines =
+    ctx.values.lines === undefined ? undefined : Number(ctx.values.lines);
+  if (lines !== undefined && (!Number.isInteger(lines) || lines < 0)) {
+    ctx.io.stderr("dsd: --lines must be a non-negative integer.\n");
+    return EXIT.USAGE;
+  }
+
+  if (ctx.values.follow === true) {
+    const logTypes = parseLogTypes(ctx.values.type);
+    if (logTypes === null) {
+      ctx.io.stderr(
+        "dsd: --type accepts a comma-separated list of stdout, stderr, system.\n",
+      );
       return EXIT.USAGE;
     }
+
+    // `--since` is a buffer query; following starts from the buffered tail and
+    // then streams live, so the two don't combine meaningfully.
+    if (ctx.values.since !== undefined) {
+      ctx.io.stderr("dsd: --since cannot be combined with --follow.\n");
+      return EXIT.USAGE;
+    }
+
+    return followLogs({
+      baseURL: ctx.baseURL,
+      serviceID: id,
+      initialLines: lines ?? DEFAULT_FOLLOW_LINES,
+      logTypes,
+      json: ctx.json,
+      plain: ctx.values.plain === true,
+      color: ctx.color,
+      stdout: ctx.io.stdout,
+      stderr: ctx.io.stderr,
+      signal: ctx.io.signal,
+    });
+  }
+
+  const params = new URLSearchParams();
+  if (lines !== undefined) {
     params.set("limit", String(lines));
   }
   if (ctx.values.type !== undefined)
