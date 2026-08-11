@@ -574,7 +574,7 @@ function AppContent() {
     );
   });
 
-  function stopAllServices() {
+  function stopAllServices(force?: boolean) {
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       addToast({
         message: "Cannot stop services: Not connected to server",
@@ -593,7 +593,18 @@ function AppContent() {
 
     // The server stops services in reverse dependency order and broadcasts
     // stop_all_* progress; we just render those (suppress our own toast here).
-    sendGlobalAction("stop_all");
+    // A forced run also sweeps up services already stuck in `stopping` from the
+    // run it's escalating, so it needs its own toast — the in-flight progress
+    // toast would otherwise be the only feedback that the click registered.
+    if (force) {
+      addToast({
+        message: "Force-stopping all services...",
+        type: "warning",
+        duration: 3000,
+      });
+    }
+
+    sendGlobalAction("stop_all", { force: !!force });
   }
 
   // Returns a service's declared dependencies that aren't currently up. A dep
@@ -651,7 +662,10 @@ function AppContent() {
         onToggleOverview={() => setShowOverview((v) => !v)}
         overviewActive={showOverview}
         startAllInProgress={startAllInProgress || !connected}
-        stopAllDisabled={!hasActiveServices || stopAllInProgress || !connected}
+        // While a Stop All runs the button escalates rather than going dead, so
+        // it only disables when there's nothing to stop or no connection.
+        stopAllDisabled={!hasActiveServices || !connected}
+        stopAllInProgress={stopAllInProgress}
         hasServices={!isLoading && activeServicesConfig.length > 0}
         dashboardName={dashboardName}
       />

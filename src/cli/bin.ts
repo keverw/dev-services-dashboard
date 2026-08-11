@@ -8,17 +8,20 @@ import { CLI_VERSION } from "./version";
  */
 
 // Ctrl+C ends a long-running command (`logs --follow`) cleanly rather than
-// killing the process mid-write. A second one exits immediately, so an
-// unresponsive socket can't trap the terminal.
+// killing the process mid-write. A second signal exits immediately, so an
+// unresponsive socket can't trap the terminal — reporting the conventional
+// 128 + signal number for whichever signal forced it (130 SIGINT, 143 SIGTERM).
 const controller = new AbortController();
 let interrupted = false;
-const onInterrupt = () => {
-  if (interrupted) process.exit(130);
+const onSignal = (code: number) => () => {
+  if (interrupted) process.exit(code);
   interrupted = true;
   controller.abort();
 };
+const onInterrupt = onSignal(130);
+const onTerminate = onSignal(143);
 process.on("SIGINT", onInterrupt);
-process.on("SIGTERM", onInterrupt);
+process.on("SIGTERM", onTerminate);
 
 void run(process.argv.slice(2), {
   stdout: (text) => process.stdout.write(text),
@@ -32,5 +35,5 @@ void run(process.argv.slice(2), {
   // Drop the signal handlers so nothing keeps the event loop alive once the
   // command has finished.
   process.off("SIGINT", onInterrupt);
-  process.off("SIGTERM", onInterrupt);
+  process.off("SIGTERM", onTerminate);
 });

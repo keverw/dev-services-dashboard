@@ -169,6 +169,31 @@ describe("CLI", () => {
       expect(JSON.parse(detail.stdout).service.status).toBe("stopped");
     });
 
+    it("accepts --grace on stop, restart, and stop-all", async () => {
+      await cli("start", "api");
+      expect((await cli("stop", "api", "--grace", "50")).code).toBe(EXIT.OK);
+      expect((await cli("restart", "api", "--grace", "50")).code).toBe(EXIT.OK);
+      expect((await cli("stop-all", "--grace", "50")).code).toBe(EXIT.OK);
+    });
+
+    it("rejects a non-positive --grace, pointing at --force", async () => {
+      // `--grace=<value>` rather than a separate argument: parseArgs rejects a
+      // dash-leading value as ambiguous before our own validation sees it (also
+      // exit 2, just a different message).
+      for (const value of ["0", "-1", "1.5", "abc"]) {
+        const { code, stderr } = await cli("stop", "api", `--grace=${value}`);
+        expect(code).toBe(EXIT.USAGE);
+        expect(stderr).toContain("--force");
+      }
+    });
+
+    it("stop-all --force works", async () => {
+      await cli("start-all");
+      const { code, stdout } = await cli("stop-all", "--force");
+      expect(code).toBe(EXIT.OK);
+      expect(stdout).toContain("1/1");
+    });
+
     it("documents --force under `stop --help`", async () => {
       const { code, stdout } = await cli("stop", "--help");
       expect(code).toBe(EXIT.OK);

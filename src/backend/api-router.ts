@@ -227,10 +227,12 @@ export class ApiRouter {
 
     if (segments[0] === "stop-all" && segments.length === 1) {
       this.assertMethod(method, ["POST"]);
-      await this.readJSONBody(req);
+      const body = await this.readJSONBody(req);
       this.assertNotShuttingDown();
 
-      const summary = await this.serviceManager.stopAllServices();
+      const summary = await this.serviceManager.stopAllServices(
+        readStopTuning(body),
+      );
       this.sendJSON(res, 200, {
         ok: true,
         stopped: summary.stopped,
@@ -356,9 +358,7 @@ export class ApiRouter {
     const body = await this.readJSONBody(req);
     this.assertNotShuttingDown();
 
-    await this.serviceManager.stopService(serviceID, {
-      force: readBooleanFlag(body, "force", false),
-    });
+    await this.serviceManager.stopService(serviceID, readStopTuning(body));
     const service = this.summaryOf(serviceID);
 
     // A service that was already `error`/`crashed` stays in that state after a
@@ -388,9 +388,10 @@ export class ApiRouter {
     const body = await this.readJSONBody(req);
     this.assertNotShuttingDown();
     const wait = readWaitFlag(body);
+    const tuning = readStopTuning(body);
 
     if (!wait) {
-      void this.serviceManager.restartService(serviceID);
+      void this.serviceManager.restartService(serviceID, tuning);
       this.sendJSON(res, 202, {
         ok: true,
         service: this.summaryOf(serviceID),
@@ -399,7 +400,7 @@ export class ApiRouter {
       return;
     }
 
-    const ok = await this.serviceManager.restartService(serviceID);
+    const ok = await this.serviceManager.restartService(serviceID, tuning);
     const service = this.summaryOf(serviceID);
     if (!ok) {
       throw new ApiFailure(
@@ -793,6 +794,30 @@ function readBooleanFlag(
 /** Reads the `wait` flag, defaulting to true (block until the outcome is known). */
 function readWaitFlag(body: Record<string, unknown> | undefined): boolean {
   return readBooleanFlag(body, "wait", true);
+}
+
+/**
+ * Reads the shared stop tuning (`force`, `graceMs`) accepted by stop, restart,
+ * and stop-all. `graceMs` must be a positive integer: rejecting 0 outright,
+ * rather than silently treating it as "no grace period", keeps `force` the one
+ * explicit way to ask for an immediate kill.
+ */
+function readStopTuning(body: Record<string, unknown> | undefined): {
+  force: boolean;
+  graceMs?: number;
+} {
+  const force = readBooleanFlag(body, "force", false);
+
+  const raw = body?.graceMs;
+  if (raw === undefined) return { force };
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw <= 0) {
+    throw new ApiFailure(
+      "bad_request",
+      '"graceMs" must be a positive integer. Use {"force":true} for no grace period.',
+    );
+  }
+
+  return { force, graceMs: raw };
 }
 
 function readIntParam(url: URL, name: string): number | undefined {

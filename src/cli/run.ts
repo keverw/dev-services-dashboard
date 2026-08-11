@@ -106,6 +106,7 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
       check: { type: "boolean", default: false },
       "no-wait": { type: "boolean", default: false },
       force: { type: "boolean", default: false },
+      grace: { type: "string" },
       plain: { type: "boolean", default: false },
       follow: { type: "boolean", short: "f", default: false },
       lines: { type: "string", short: "n" },
@@ -351,6 +352,25 @@ async function commandStatus(ctx: Ctx): Promise<number> {
     : EXIT.OK;
 }
 
+/**
+ * Reads `--force` / `--grace <ms>` into the request body fields the stop,
+ * restart, and stop-all endpoints share. Returns null on a malformed `--grace`.
+ */
+function stopTuning(ctx: Ctx): { force: boolean; graceMs?: number } | null {
+  const force = ctx.values.force === true;
+  if (ctx.values.grace === undefined) return { force };
+
+  const graceMs = Number(ctx.values.grace);
+  if (!Number.isInteger(graceMs) || graceMs <= 0) {
+    ctx.io.stderr(
+      "dsd: --grace must be a positive integer (ms). Use --force for no grace period.\n",
+    );
+    return null;
+  }
+
+  return { force, graceMs };
+}
+
 async function commandLifecycle(
   ctx: Ctx,
   action: "start" | "stop" | "restart",
@@ -358,10 +378,19 @@ async function commandLifecycle(
   const id = requireService(ctx);
   if (!id) return EXIT.USAGE;
 
-  const body =
-    action === "stop"
-      ? { force: ctx.values.force === true }
-      : { wait: ctx.values["no-wait"] !== true };
+  let body: Record<string, unknown>;
+  if (action === "start") {
+    body = { wait: ctx.values["no-wait"] !== true };
+  } else {
+    // Stop and restart both tear a process down, so both take the tuning; a
+    // restart additionally carries the wait flag for its start half.
+    const tuning = stopTuning(ctx);
+    if (!tuning) return EXIT.USAGE;
+    body =
+      action === "stop"
+        ? tuning
+        : { ...tuning, wait: ctx.values["no-wait"] !== true };
+  }
 
   const result = await ctx.client.post<ServiceResponse>(
     `/services/${encodeURIComponent(id)}/${action}`,
@@ -393,7 +422,10 @@ async function commandStartAll(ctx: Ctx): Promise<number> {
 }
 
 async function commandStopAll(ctx: Ctx): Promise<number> {
-  const result = await ctx.client.post<StopAllResponse>("/stop-all");
+  const tuning = stopTuning(ctx);
+  if (!tuning) return EXIT.USAGE;
+
+  const result = await ctx.client.post<StopAllResponse>("/stop-all", tuning);
   if (result.kind !== "ok") return reportFailure(ctx, result);
 
   const { stopped, failed, total } = result.data;

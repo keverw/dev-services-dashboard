@@ -36,6 +36,7 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
   - [Connecting](#connecting)
   - [Commands](#commands)
   - [Stopping a stuck service](#stopping-a-stuck-service)
+  - [Going faster in a restart loop](#going-faster-in-a-restart-loop)
   - [Following logs](#following-logs)
   - [Exit codes](#exit-codes)
   - [HTTP control API](#http-control-api)
@@ -679,6 +680,7 @@ The dashboard URL is resolved in this order:
 | `dsd start <service>`             | Start it and **wait** for the outcome                                          |
 | `dsd stop <service>`              | Stop it and wait for it to terminate                                           |
 | `dsd stop <service> --force`      | Skip the grace period and SIGKILL it now                                       |
+| `dsd stop-all --force`            | Same, for every service — including any already stuck `stopping`               |
 | `dsd restart <service>`           | Restart it and wait for it to come back up                                     |
 | `dsd start-all` / `dsd stop-all`  | Start/stop everything in (reverse) dependency order                            |
 | `dsd logs <service>`              | Buffered log lines, newest last                                                |
@@ -688,7 +690,7 @@ The dashboard URL is resolved in this order:
 | `dsd health` (`ping`)             | Check a dashboard is reachable                                                 |
 | `dsd help [<command>]`            | Help; `dsd help --json` emits the full machine-readable manifest               |
 
-Useful flags: `--json` (machine-readable output), `-f`/`--follow`, `--lines <n>`, `--type stdout,stderr,system`, `--since <epoch-ms>`, `--plain` (bare log lines, no timestamp prefix), `--force`, `--no-wait`, `--timeout <ms>`, `--no-color`.
+Useful flags: `--json` (machine-readable output), `-f`/`--follow`, `--lines <n>`, `--type stdout,stderr,system`, `--since <epoch-ms>`, `--plain` (bare log lines, no timestamp prefix), `--force`, `--grace <ms>`, `--no-wait`, `--timeout <ms>`, `--no-color`.
 
 ```bash
 dsd status
@@ -710,9 +712,24 @@ dsd stop api --force
 
 It also works on a service **already** stuck in `stopping` — that's the case it really exists for. Rather than starting a second stop, it cuts short the grace period of the one already in flight, and the original caller settles normally too.
 
-The web UI mirrors this: while a stop is in flight, the **Stop** button becomes a pulsing **Force Stop** instead of greying out, sending the same request. `POST /api/v1/services/:id/stop` takes `{"force": true}`.
+The web UI mirrors this: while a stop is in flight, the **Stop** button becomes a pulsing **Force Stop** instead of greying out, sending the same request. The header's **Stop All** does the same, becoming **Force Stop All** while a run is under way — and a forced run also sweeps up services already stuck `stopping` from the run it's escalating, which a normal stop-all skips.
 
 > Note this is different from sending `SIGKILL` through the signals dropdown (or `dsd signal`). Signals must be declared in the service's `signals` config, are delivered only to the main process, and don't move the service to `stopping` or reap escaped descendants. A force stop is a stop — it just skips the polite phase.
+
+### Going faster in a restart loop
+
+`--grace <ms>` overrides the SIGTERM grace period for a single request, instead of the service's configured `stopTimeout`. It's aimed at automation: a script or agent restarting a service on every edit pays that grace period every cycle, and usually knows its own service shuts down far quicker than the configured default allows for.
+
+```bash
+dsd restart api --grace 300   # 300ms to exit cleanly, then SIGKILL
+dsd restart api --force       # don't even ask
+```
+
+Against a service that ignores SIGTERM with `stopTimeout: 60000`, a plain `dsd restart` takes just over 60s; `--grace 300` takes 0.9s and `--force` 0.6s.
+
+It works on `stop`, `restart`, and `stop-all`, and over HTTP as `{"graceMs": 300}`. `graceMs` must be a **positive integer** — `0` is rejected rather than silently meaning "no grace period", so `force` stays the one explicit way to ask for an immediate kill.
+
+There is no UI control for this one: it's a numeric knob for automation, where Force Stop is the human affordance. Note also that a restart's fixed 500ms settle pause (which lets the OS release the old process's port) is deliberately not overridable — it guards a real race, and shortening it would trade a rare hang for a much more annoying flaky start.
 
 ### Following logs
 
@@ -756,19 +773,19 @@ Under `--json`, successful output is a single JSON object on **stdout**, and err
 
 The CLI is a thin wrapper over `/api/v1`, so plain `curl` works just as well — handy for an agent that doesn't have the CLI installed.
 
-| Method   | Path                                     | Notes                                                   |
-| -------- | ---------------------------------------- | ------------------------------------------------------- |
-| `GET`    | `/api/v1`                                | Self-describing route index                             |
-| `GET`    | `/api/v1/health`                         | `{dashboardName, shuttingDown, serviceCount, uptimeMs}` |
-| `GET`    | `/api/v1/services`                       | Every service with its status                           |
-| `GET`    | `/api/v1/services/:id`                   | One service                                             |
-| `POST`   | `/api/v1/services/:id/start`             | Body `{"wait":false}` to return immediately (`202`)     |
-| `POST`   | `/api/v1/services/:id/stop`              | Body `{"force":true}` to SIGKILL immediately            |
-| `POST`   | `/api/v1/services/:id/restart`           | Body `{"wait":false}` supported                         |
-| `POST`   | `/api/v1/services/:id/signal`            | Body `{"signal":"SIGHUP"}`                              |
-| `GET`    | `/api/v1/services/:id/logs`              | Query: `limit`, `since`, `logType`, `format=text`       |
-| `DELETE` | `/api/v1/services/:id/logs`              | Clear the buffer                                        |
-| `POST`   | `/api/v1/start-all` / `/api/v1/stop-all` | Returns the run's counts                                |
+| Method   | Path                                     | Notes                                                    |
+| -------- | ---------------------------------------- | -------------------------------------------------------- |
+| `GET`    | `/api/v1`                                | Self-describing route index                              |
+| `GET`    | `/api/v1/health`                         | `{dashboardName, shuttingDown, serviceCount, uptimeMs}`  |
+| `GET`    | `/api/v1/services`                       | Every service with its status                            |
+| `GET`    | `/api/v1/services/:id`                   | One service                                              |
+| `POST`   | `/api/v1/services/:id/start`             | Body `{"wait":false}` to return immediately (`202`)      |
+| `POST`   | `/api/v1/services/:id/stop`              | Body `{"force":true}` or `{"graceMs":N}`                 |
+| `POST`   | `/api/v1/services/:id/restart`           | Body `{"wait":false}`, `{"force":true}`, `{"graceMs":N}` |
+| `POST`   | `/api/v1/services/:id/signal`            | Body `{"signal":"SIGHUP"}`                               |
+| `GET`    | `/api/v1/services/:id/logs`              | Query: `limit`, `since`, `logType`, `format=text`        |
+| `DELETE` | `/api/v1/services/:id/logs`              | Clear the buffer                                         |
+| `POST`   | `/api/v1/start-all` / `/api/v1/stop-all` | Counts for the run; stop-all takes `force` / `graceMs`   |
 
 ```bash
 curl localhost:4000/api/v1/services
@@ -814,6 +831,9 @@ Control them with the `dsd` CLI (add `--json` for machine-readable output):
 
 Prefer `--lines` over `dsd logs -f`: follow runs until interrupted, so only use
 it with a timeout (e.g. `timeout 10 dsd logs api -f`).
+
+In a fast edit/restart loop, `dsd restart <service> --grace 300` avoids waiting
+out the full shutdown grace period on every cycle.
 
 Exit codes: 0 ok, 2 usage, 3 failed, 4 no such service, 5 dashboard unreachable.
 Run `dsd help --json` for the full command manifest.

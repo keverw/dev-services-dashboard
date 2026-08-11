@@ -104,10 +104,16 @@ export type ServerMessage =
 /** Messages the client sends to the server, discriminated on `action`. */
 export type ClientMessage =
   | { action: "start_all" }
-  | { action: "stop_all" }
-  | { action: "start" | "restart" | "clear_logs"; serviceID: string }
   | {
-      action: "stop";
+      action: "stop_all";
+      /** Force-kill every service, including ones already `stopping`. */
+      force?: boolean;
+      /** Override the grace period for every stop in this run. */
+      graceMs?: number;
+    }
+  | { action: "start" | "clear_logs"; serviceID: string }
+  | {
+      action: "stop" | "restart";
       serviceID: string;
       /**
        * Skip the graceful phase and SIGKILL the process immediately, instead of
@@ -116,5 +122,12 @@ export type ClientMessage =
        * the grace period of the stop already in flight.
        */
       force?: boolean;
+      /**
+       * Override how long this stop waits before escalating to SIGKILL, instead
+       * of the service's configured `stopTimeout`. Non-positive values fall back
+       * to the configured value; `force` (no grace period at all) takes
+       * precedence over both.
+       */
+      graceMs?: number;
     }
   | { action: "send_signal"; serviceID: string; signal: string };

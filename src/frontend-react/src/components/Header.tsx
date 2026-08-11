@@ -3,11 +3,14 @@ import { useState, useEffect } from "react";
 
 interface HeaderProps {
   onStartAll?: () => void;
-  onStopAll?: () => void;
+  /** `force` is true when escalating a Stop All that's already running. */
+  onStopAll?: (force?: boolean) => void;
   onToggleOverview?: () => void;
   overviewActive?: boolean;
   startAllInProgress?: boolean;
   stopAllDisabled?: boolean;
+  /** A Stop All run is under way, so the button offers to escalate it. */
+  stopAllInProgress?: boolean;
   hasServices?: boolean;
   dashboardName?: string;
 }
@@ -19,6 +22,7 @@ function Header({
   overviewActive,
   startAllInProgress,
   stopAllDisabled,
+  stopAllInProgress,
   hasServices,
   dashboardName,
 }: HeaderProps) {
@@ -108,13 +112,24 @@ function Header({
           </button>
         )}
         {onStopAll && (
+          // Same escalate-on-second-press idea as a service's own Stop button:
+          // while a Stop All is running the button stays live and offers to
+          // force the whole run, instead of greying out for its duration.
           <button
-            className="stop-all-header-btn"
-            onClick={onStopAll}
+            className={
+              stopAllInProgress
+                ? "stop-all-header-btn force-stop"
+                : "stop-all-header-btn"
+            }
+            onClick={() => onStopAll(stopAllInProgress)}
             disabled={stopAllDisabled}
-            title="Stop all services"
+            title={
+              stopAllInProgress
+                ? "Force stop all services — SIGKILL now, without waiting out their grace periods"
+                : "Stop all services"
+            }
           >
-            Stop All
+            {stopAllInProgress ? "Force Stop All" : "Stop All"}
           </button>
         )}
       </div>

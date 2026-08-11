@@ -51,6 +51,11 @@ export const COMMANDS: CommandSpec[] = [
         summary:
           "SIGKILL immediately instead of SIGTERM plus the stopTimeout grace period. Works on a service already wedged in `stopping`, where it cuts the wait short.",
       },
+      {
+        name: "--grace <ms>",
+        summary:
+          "Override the SIGTERM grace period for this request, instead of the service's configured stopTimeout. Useful in a fast edit/restart loop.",
+      },
     ],
   },
   {
@@ -63,6 +68,16 @@ export const COMMANDS: CommandSpec[] = [
       {
         name: "--no-wait",
         summary: "Return as soon as the restart is triggered.",
+      },
+      {
+        name: "--force",
+        summary:
+          "SIGKILL the old process immediately rather than waiting out its grace period.",
+      },
+      {
+        name: "--grace <ms>",
+        summary:
+          "Override the SIGTERM grace period for this request, instead of the service's configured stopTimeout. Useful in a fast edit/restart loop.",
       },
     ],
   },
@@ -79,7 +94,18 @@ export const COMMANDS: CommandSpec[] = [
     args: "",
     summary:
       "Stop every service in reverse dependency order. Exits 3 if any failed.",
-    flags: [],
+    flags: [
+      {
+        name: "--force",
+        summary:
+          "SIGKILL every service, including any already stuck in `stopping` from an earlier stop-all.",
+      },
+      {
+        name: "--grace <ms>",
+        summary:
+          "Override the SIGTERM grace period for this request, instead of the service's configured stopTimeout. Useful in a fast edit/restart loop.",
+      },
+    ],
   },
   {
     name: "logs",

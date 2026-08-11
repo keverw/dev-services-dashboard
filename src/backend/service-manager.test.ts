@@ -1885,3 +1885,100 @@ describe("force stop", () => {
     expect(sm.getService("a")!.status).toBe("stopped");
   });
 });
+
+describe("graceMs override", () => {
+  it("escalates on the override rather than the configured stopTimeout", async () => {
+    // 60s configured; a 40ms override must be what actually fires.
+    const { sm } = makeManager([svc("a", { stopTimeout: 60_000 })]);
+    await startAndRun(sm, "a");
+    spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
+
+    killLog.length = 0;
+    const stop = sm.stopService("a", { graceMs: 40 });
+    await new Promise((r) => realSetTimeout(r, 150));
+
+    expect(killLog[0].signal).toBe("SIGTERM");
+    expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(true);
+    await stop;
+  });
+
+  it("ignores a non-positive override, keeping the configured timeout", async () => {
+    const { sm } = makeManager([svc("a", { stopTimeout: 50 })]);
+    await startAndRun(sm, "a");
+    spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
+
+    killLog.length = 0;
+    // 0 must not mean "SIGKILL immediately" — `force` is the way to ask for that.
+    const stop = sm.stopService("a", { graceMs: 0 });
+    await new Promise((r) => realSetTimeout(r, 20));
+    expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(false);
+
+    await new Promise((r) => realSetTimeout(r, 120));
+    expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(true);
+    await stop;
+  });
+
+  it("is passed through by restartService", async () => {
+    const { sm } = makeManager([svc("a", { stopTimeout: 60_000 })]);
+    await startAndRun(sm, "a");
+    spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
+
+    killLog.length = 0;
+    // Without the override this would sit on the 60s grace period.
+    await sm.restartService("a", { graceMs: 40 });
+
+    expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(true);
+    expect(sm.getService("a")!.status).toBe("running");
+  });
+});
+
+describe("force stop all", () => {
+  it("force-kills every service without a graceful phase", async () => {
+    const { sm } = makeManager([svc("a"), svc("b")]);
+    await sm.startAllServices();
+
+    killLog.length = 0;
+    const summary = await sm.stopAllServices({ force: true });
+
+    expect(summary.stopped).toBe(2);
+    expect(killLog.every((k) => k.signal === "SIGKILL")).toBe(true);
+  });
+
+  it("sweeps up services already stuck in `stopping`", async () => {
+    // A normal stop-all skips anything already `stopping` — but those are
+    // exactly the services a Force Stop All has to reach.
+    const { sm } = makeManager([svc("a", { stopTimeout: 60_000 })], {
+      timeouts: { stopTimeout: 60_000 },
+    });
+    await startAndRun(sm, "a");
+    spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
+
+    const graceful = sm.stopService("a");
+    await tick();
+    expect(sm.getService("a")!.status).toBe("stopping");
+
+    killLog.length = 0;
+    const summary = await sm.stopAllServices({ force: true });
+
+    expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(true);
+    expect(summary.total).toBe(1);
+    expect(sm.getService("a")!.status).toBe("stopped");
+    await graceful;
+  });
+
+  it("still skips `stopping` services on a normal run", async () => {
+    const { sm } = makeManager([svc("a", { stopTimeout: 60_000 })], {
+      timeouts: { stopTimeout: 60_000 },
+    });
+    await startAndRun(sm, "a");
+    spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
+
+    const graceful = sm.stopService("a");
+    await tick();
+
+    expect((await sm.stopAllServices()).total).toBe(0);
+
+    await sm.stopService("a", { force: true });
+    await graceful;
+  });
+});

@@ -83,6 +83,10 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
           err instanceof Error ? err.message : String(err)
         })\n`,
       );
+      // There's no socket to close, so this can't go through `finish` — but the
+      // abort listener still has to come off, like on every other exit path.
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
       resolve(EXIT.UNREACHABLE);
       return;
     }

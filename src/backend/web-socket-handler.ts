@@ -3,6 +3,25 @@ import { ServiceManager } from "./service-manager";
 import { type WebSocket } from "ws";
 import type { ServerMessage } from "@shared/protocol";
 
+/**
+ * Reads the optional stop tuning off a `stop` / `restart` frame.
+ *
+ * Only an explicit `true` counts as `force`, so a stray value can't turn a
+ * normal stop into a kill, and a non-numeric `graceMs` is dropped rather than
+ * passed through — the manager treats a non-positive grace as "unset" and falls
+ * back to the configured `stopTimeout` either way.
+ */
+function readStopOptions(data: Record<string, unknown>): {
+  force: boolean;
+  graceMs?: number;
+} {
+  const { force, graceMs } = data as { force?: unknown; graceMs?: unknown };
+  return {
+    force: force === true,
+    graceMs: typeof graceMs === "number" ? graceMs : undefined,
+  };
+}
+
 export class WebSocketHandler {
   private serviceManager: ServiceManager;
   private logger: Logger;
@@ -79,7 +98,7 @@ export class WebSocketHandler {
     }
 
     if (action === "stop_all") {
-      await this.serviceManager.stopAllServices();
+      await this.serviceManager.stopAllServices(readStopOptions(data));
       return;
     }
 
@@ -113,17 +132,14 @@ export class WebSocketHandler {
         // initializing/finalizing forever.
         await this.serviceManager.startAndWait(serviceID);
         break;
-      case "stop": {
-        // `force` skips SIGTERM and the grace period. Only an explicit `true`
-        // counts, so a stray value can't turn a normal stop into a kill.
-        const { force } = data as { force?: unknown };
-        await this.serviceManager.stopService(serviceID, {
-          force: force === true,
-        });
+      case "stop":
+        await this.serviceManager.stopService(serviceID, readStopOptions(data));
         break;
-      }
       case "restart":
-        await this.serviceManager.restartService(serviceID);
+        await this.serviceManager.restartService(
+          serviceID,
+          readStopOptions(data),
+        );
         break;
       case "clear_logs":
         this.serviceManager.clearServiceLogs(serviceID);

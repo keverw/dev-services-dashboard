@@ -229,6 +229,37 @@ describe("Control API", () => {
       expect(body.services).toHaveLength(2);
     });
 
+    it("accepts a graceMs override on stop and restart", async () => {
+      await postJSON("/services/api/start");
+      expect(
+        (await postJSON("/services/api/stop", { graceMs: 50 })).status,
+      ).toBe(200);
+      expect(
+        (await postJSON("/services/api/restart", { graceMs: 50 })).status,
+      ).toBe(200);
+    });
+
+    it("rejects a non-positive or non-integer graceMs", async () => {
+      for (const graceMs of [0, -5, 1.5, "500"]) {
+        const res = await postJSON("/services/api/stop", { graceMs });
+        expect(res.status).toBe(400);
+        expect((await res.json()).error.code).toBe("bad_request");
+      }
+    });
+
+    it("force-stops every service via stop-all", async () => {
+      await postJSON("/start-all");
+
+      const res = await postJSON("/stop-all", { force: true });
+      expect(res.status).toBe(200);
+
+      const body = await res.json();
+      expect(body.stopped).toBe(2);
+      expect(
+        body.services.every((s: { status: string }) => s.status === "stopped"),
+      ).toBe(true);
+    });
+
     it("reports stop-all counts", async () => {
       await postJSON("/start-all");
 

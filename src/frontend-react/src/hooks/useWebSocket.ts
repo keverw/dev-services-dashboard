@@ -47,10 +47,13 @@ export function useWebSocket({
     }
   };
 
-  const sendGlobalAction = (action: string) => {
+  const sendGlobalAction = (
+    action: string,
+    payload?: Record<string, unknown>,
+  ) => {
     const ws = socketRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ action }));
+      ws.send(JSON.stringify({ action, ...payload }));
     } else {
       console.error("WebSocket not connected.");
     }

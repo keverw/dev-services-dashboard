@@ -176,6 +176,23 @@ header {
   @apply bg-error-600;
 }
 
+/* Escalated variant, matching a service's own Force Stop button: while a Stop
+   All is running the button offers to force the whole run instead of greying
+   out for its duration. */
+.stop-all-header-btn.force-stop {
+  @apply bg-error-600;
+  animation: forceStopPulse 1.4s ease-in-out infinite;
+}
+.stop-all-header-btn.force-stop:hover {
+  @apply bg-error-700;
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stop-all-header-btn.force-stop {
+    animation: none;
+  }
+}
+
 .stop-all-header-btn:disabled {
   @apply cursor-not-allowed bg-gray-400;
 }

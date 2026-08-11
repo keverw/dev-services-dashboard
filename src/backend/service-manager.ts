@@ -1019,6 +1019,14 @@ export class ServiceManager {
    * accepted while a service is already `stopping`, where it cuts short the
    * grace period of the stop already in flight — that wedged case is the main
    * reason to reach for it.
+   *
+   * `opts.graceMs` overrides how long this one stop waits before escalating,
+   * instead of the service's configured `stopTimeout`. It exists for automation:
+   * a script or agent restarting a service in a loop pays the full grace period
+   * every time, and usually knows its own service shuts down far quicker than
+   * the configured default allows for. Non-positive values fall back to the
+   * configured timeout (the same convention every other numeric option here
+   * follows), so `force` remains the way to ask for no grace period at all.
    */
   async stopService(
     serviceID: string,
@@ -1026,6 +1034,7 @@ export class ServiceManager {
       finalStatus?: Service["status"];
       errorDetails?: string;
       force?: boolean;
+      graceMs?: number;
     } = {},
   ): Promise<void> {
     const service = this.getService(serviceID);
@@ -1213,7 +1222,12 @@ export class ServiceManager {
         () => escalate("timeout"),
         // `positiveOr` so a per-service `stopTimeout` of 0 (or negative) falls
         // back to the global default rather than meaning "SIGKILL immediately".
-        positiveOr(service.stopTimeout, this.defaultStopTimeout),
+        // A per-request `graceMs` takes precedence over both, and is guarded the
+        // same way, so a bad override can't collapse the grace period to 0ms.
+        positiveOr(
+          opts.graceMs,
+          positiveOr(service.stopTimeout, this.defaultStopTimeout),
+        ),
       );
     });
 
@@ -1233,8 +1247,15 @@ export class ServiceManager {
    * a truthful outcome rather than assuming a restart succeeded. False also
    * covers the two early returns: a restart refused during shutdown, and an
    * unknown service ID.
+   *
+   * `opts.force` / `opts.graceMs` are passed through to the stop half, so a
+   * caller that restarts repeatedly (a script or an agent iterating on a
+   * service) doesn't have to pay the configured grace period on every cycle.
    */
-  async restartService(serviceID: string): Promise<boolean> {
+  async restartService(
+    serviceID: string,
+    opts: { force?: boolean; graceMs?: number } = {},
+  ): Promise<boolean> {
     // Restart would stop then start; during shutdown the start half must not run.
     if (this.shuttingDown) return false;
 
@@ -1258,15 +1279,23 @@ export class ServiceManager {
       service.status !== "stopped" &&
       service.status !== "error"
     ) {
-      await this.stopService(serviceID);
+      await this.stopService(serviceID, {
+        force: opts.force,
+        graceMs: opts.graceMs,
+      });
       // Brief settle pause between teardown and respawn: lets the OS finish
       // releasing the old process's resources (e.g. its listening port) so the
-      // new process doesn't immediately hit EADDRINUSE on a fast restart.
+      // new process doesn't immediately hit EADDRINUSE on a fast restart. Kept
+      // fixed and not overridable — it guards a real race, and shortening it
+      // trades a rare hang for a much more annoying flaky start.
       await new Promise((resolve) => setTimeout(resolve, 500));
     } else if (service.status === "initializing") {
       // Pre-spawn: no process to release (so no settle pause), but abort the
       // in-flight pre-start hook so the start below runs a fresh one.
-      await this.stopService(serviceID);
+      await this.stopService(serviceID, {
+        force: opts.force,
+        graceMs: opts.graceMs,
+      });
     }
 
     // The start we just aborted may still be an in-flight `startAndWait` run
@@ -1293,9 +1322,24 @@ export class ServiceManager {
     }
   }
 
-  async stopAllServices(): Promise<StopAllSummary> {
+  /**
+   * Stops every live service in reverse start order.
+   *
+   * `opts` is passed through to each individual stop, so a "Force Stop All"
+   * escalates the whole run — including services already `stopping` from the
+   * graceful run it's escalating, which is the point: a wedged stack otherwise
+   * makes you wait out every service's grace period in turn.
+   */
+  async stopAllServices(
+    opts: { force?: boolean; graceMs?: number } = {},
+  ): Promise<StopAllSummary> {
     // Stop sequentially in reverse start order so dependents shut down before
     // the dependencies they rely on.
+    //
+    // A forced run also picks up services already `stopping`. They're skipped
+    // normally (a stop is already under way, so there'd be nothing to do), but
+    // those are exactly the ones a "Force Stop All" is aimed at — the run it is
+    // escalating left them waiting out their grace periods.
     const toStop = [...this.services]
       .reverse()
       .filter(
@@ -1304,7 +1348,8 @@ export class ServiceManager {
           (s.process &&
             (s.status === "running" ||
               s.status === "starting" ||
-              s.status === "finalizing")),
+              s.status === "finalizing" ||
+              (opts.force && s.status === "stopping"))),
       );
 
     const total = toStop.length;
@@ -1325,7 +1370,10 @@ export class ServiceManager {
       for (const service of toStop) {
         let ok = true;
         try {
-          await this.stopService(service.id);
+          await this.stopService(service.id, {
+            force: opts.force,
+            graceMs: opts.graceMs,
+          });
         } catch (err) {
           ok = false;
           this.logger.error(
