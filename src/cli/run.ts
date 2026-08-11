@@ -45,8 +45,23 @@ export interface CliIO {
   signal?: AbortSignal;
 }
 
-/** Commands whose server side can legitimately block for a long time. */
-const SLOW_COMMANDS = new Set(["start", "restart", "start-all", "stop-all"]);
+/**
+ * Commands whose server side can legitimately block for a long time, so they
+ * get no client-side deadline at all.
+ *
+ * `stop` belongs here as much as the start-like ones: a stop sends SIGTERM and
+ * then waits out the service's `stopTimeout` before escalating to SIGKILL, and
+ * that timeout is configurable per service — so any value above the default
+ * client deadline would abort the request and report a failure while the
+ * server's stop was still legitimately in progress.
+ */
+const SLOW_COMMANDS = new Set([
+  "start",
+  "stop",
+  "restart",
+  "start-all",
+  "stop-all",
+]);
 const DEFAULT_TIMEOUT_MS = 15_000;
 /** Buffered lines replayed before `logs --follow` switches to live output. */
 const DEFAULT_FOLLOW_LINES = 10;
@@ -534,3 +549,10 @@ async function commandHealth(ctx: Ctx): Promise<number> {
 
 /** Exported for the help text tests. */
 export { COMMANDS };
+
+/**
+ * The default client deadline for a command, in ms (0 meaning "no deadline").
+ * Exported so a test can pin which commands are allowed to run unbounded.
+ */
+export const resolveTimeoutForTest = (commandName: string): number =>
+  resolveTimeout(undefined, commandName) ?? -1;

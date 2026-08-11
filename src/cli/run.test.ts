@@ -30,7 +30,7 @@ mock.module("child_process", () => ({
 
 import { startDevServicesDashboard } from "../backend/index";
 import type { DevUIServer } from "../backend/types";
-import { run, type CliIO } from "./run";
+import { run, resolveTimeoutForTest, type CliIO } from "./run";
 import { EXIT } from "./exit-codes";
 
 function freePort(): Promise<number> {
@@ -172,6 +172,24 @@ describe("CLI", () => {
       const { code, stderr } = await cli("start");
       expect(code).toBe(EXIT.USAGE);
       expect(stderr).toContain("service id is required");
+    });
+
+    it("applies no client deadline to the lifecycle commands", async () => {
+      // A stop waits out the service's configurable `stopTimeout` before
+      // escalating to SIGKILL, and a start can run for the sum of the three
+      // start windows. A default client deadline on either would abort the
+      // request and report a failure while the server was still working.
+      for (const command of [
+        "start",
+        "stop",
+        "restart",
+        "start-all",
+        "stop-all",
+      ]) {
+        expect(resolveTimeoutForTest(command)).toBe(0);
+      }
+      expect(resolveTimeoutForTest("status")).toBeGreaterThan(0);
+      expect(resolveTimeoutForTest("logs")).toBeGreaterThan(0);
     });
   });
 

@@ -134,36 +134,4 @@ export class ApiClient {
 
     return { kind: "api", status: response.status, error };
   }
-
-  /** Fetches raw text (used for `logs --text`, which the server renders as text/plain). */
-  async getText(path: string): Promise<ApiResult<string>> {
-    const url = `${this.options.baseURL}/api/v1${path}`;
-    try {
-      const response = await fetch(url, { headers: { Accept: "text/plain" } });
-      const text = await response.text();
-
-      if (!response.ok) {
-        try {
-          const error = (JSON.parse(text) as { error?: ApiError }).error;
-          if (error?.code)
-            return { kind: "api", status: response.status, error };
-        } catch {
-          // fall through to the generic message below
-        }
-        return {
-          kind: "unexpected",
-          message: `HTTP ${response.status} from ${url}`,
-        };
-      }
-
-      return { kind: "ok", status: response.status, data: text };
-    } catch (err) {
-      return {
-        kind: "unreachable",
-        message: `Could not reach a dashboard at ${this.options.baseURL} (${
-          err instanceof Error ? err.message : String(err)
-        })`,
-      };
-    }
-  }
 }
