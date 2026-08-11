@@ -1,6 +1,6 @@
 {
   "name": "dev-services-dashboard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A lightweight development UI dashboard for managing and monitoring multiple services during local development",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -11,6 +11,10 @@
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     }
+  },
+  "bin": {
+    "dev-services-dashboard": "dist/bin.js",
+    "dsd": "dist/bin.js"
   },
   "files": [
     "dist"

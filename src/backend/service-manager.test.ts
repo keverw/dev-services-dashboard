@@ -1723,3 +1723,103 @@ describe("nonEmptyStringOr", () => {
     expect(nonEmptyStringOr({}, "localhost")).toBe("localhost");
   });
 });
+
+// --- Outcome return values --------------------------------------------------
+//
+// These methods used to return void and record their outcome only in the
+// service's log stream. They now report it to the caller as well, which is what
+// lets the HTTP control API answer with a meaningful status code.
+
+describe("sendSignal return value", () => {
+  it("reports 'sent' for a declared signal on a running service", async () => {
+    const { sm } = makeManager([
+      svc("a", { signals: [{ label: "Reload", signal: "SIGHUP" }] }),
+    ]);
+    await startAndRun(sm, "a");
+
+    expect(sm.sendSignal("a", "SIGHUP")).toBe("sent");
+  });
+
+  it("distinguishes an undeclared signal from a stopped service", async () => {
+    const { sm } = makeManager([
+      svc("a", { signals: [{ label: "Reload", signal: "SIGHUP" }] }),
+    ]);
+
+    // Not running yet: the state conflict wins.
+    expect(sm.sendSignal("a", "SIGHUP")).toBe("not_running");
+
+    await startAndRun(sm, "a");
+    // Running, but the config never opted into this one.
+    expect(sm.sendSignal("a", "SIGUSR2")).toBe("not_declared");
+  });
+
+  it("reports an unknown signal name distinctly from an undeclared one", async () => {
+    const { sm } = makeManager([
+      svc("a", { signals: [{ label: "Nope", signal: "SIGNOTREAL" }] }),
+    ]);
+    await startAndRun(sm, "a");
+
+    expect(sm.sendSignal("a", "SIGNOTREAL")).toBe("unknown_signal");
+  });
+
+  it("reports an unknown service id", () => {
+    const { sm } = makeManager([svc("a")]);
+    expect(sm.sendSignal("missing", "SIGHUP")).toBe("service_not_found");
+  });
+});
+
+describe("startAllServices / stopAllServices summaries", () => {
+  it("returns the counts it broadcasts", async () => {
+    const { sm } = makeManager([svc("a"), svc("b")]);
+
+    const started = await sm.startAllServices();
+    expect(started).toEqual({
+      ran: true,
+      started: 2,
+      failed: 0,
+      skipped: 0,
+      total: 2,
+    });
+
+    const stopped = await sm.stopAllServices();
+    expect(stopped.stopped).toBe(2);
+    expect(stopped.failed).toBe(0);
+    expect(stopped.total).toBe(2);
+  });
+
+  it("reports ran:false rather than a zero run once shutting down", async () => {
+    const { sm } = makeManager([svc("a")]);
+    sm.beginShutdown();
+
+    const summary = await sm.startAllServices();
+    // The distinction matters: {started: 0} alone would read as a total failure.
+    expect(summary.ran).toBe(false);
+    expect(summary.started).toBe(0);
+  });
+
+  it("reports a zero-total stop when nothing is running", async () => {
+    const { sm } = makeManager([svc("a")]);
+    expect(await sm.stopAllServices()).toEqual({
+      stopped: 0,
+      failed: 0,
+      total: 0,
+    });
+  });
+});
+
+describe("restartService return value", () => {
+  it("reports success when the service comes back up", async () => {
+    const { sm } = makeManager([svc("a")]);
+    await startAndRun(sm, "a");
+
+    expect(await sm.restartService("a")).toBe(true);
+  });
+
+  it("reports failure for an unknown service and during shutdown", async () => {
+    const { sm } = makeManager([svc("a")]);
+    expect(await sm.restartService("missing")).toBe(false);
+
+    sm.beginShutdown();
+    expect(await sm.restartService("a")).toBe(false);
+  });
+});

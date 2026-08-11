@@ -12,6 +12,11 @@
   - [UX / fixes](#ux--fixes)
   - [Tests](#tests)
   - [Build / tooling](#build--tooling)
+- [1.1.0 (August 11, 2026)](#110-august-11-2026)
+  - [Features](#features-1)
+  - [Fixes](#fixes)
+  - [Tests](#tests-1)
+  - [Build / tooling](#build--tooling-1)
 
 <!-- tocstop -->
 
@@ -99,3 +104,32 @@
 - Fixed `tsconfig.json` to exclude `src/frontend-react` (which has its own tsconfig/Vite toolchain) so `tsc --noEmit` only checks the published library code
 - Fixed pre-existing lint errors surfaced by the new config (`any` types, unused vars, `ToastContext` forward-reference bug)
 - Cleared all remaining React Hooks lint warnings — `bun run lint` is now warning-free: derived `theme` in `ThemeContext` instead of mirroring it into state via an effect, removed a redundant `activeTabId` read from the mount-only load effect, deleted the unused legacy `Toast.tsx` component, and added scoped suppressions (with reasons) for the intentional mount-once WebSocket effect and two `Date.now()` calls in non-render event handlers
+
+## 1.1.0 (August 11, 2026)
+
+### Features
+
+- **CLI (`dsd`)** — the package now ships two binaries, `dev-services-dashboard` and the shorter `dsd`. The CLI is a **client for a dashboard that is already running**: it doesn't start the dashboard and doesn't read your config (which contains `beforeStart`/`afterStart` _functions_, so no standalone config file could express it) — you keep booting it however you do today, and the CLI drives that process. Commands: `status` (aliases `ls`/`list`/`ps`), `start`, `stop`, `restart`, `start-all`, `stop-all`, `logs`, `clear-logs`, `signal`, `health`, `help`, `version`. The dashboard URL comes from `--url`, then `$DEV_SERVICES_DASHBOARD_URL`, then `$DSD_URL`, then `http://localhost:4000`.
+- **Built for scripts and AI agents** — every command takes `--json` for a single machine-readable object on stdout, with errors as JSON on stderr so stdout stays clean for piping, and returns a documented exit code (`0` ok, `2` usage, `3` operation failed, `4` no such service, `5` dashboard unreachable, `6` shutting down, `7` signal not allowed, `8` unexpected response). `dsd status <service> --check` exits non-zero unless the service is running, so `dsd status api --check || dsd start api` is a one-liner, and `dsd help --json` emits the full command manifest for an agent to discover the surface. The README has a copy-pasteable `AGENTS.md`/`CLAUDE.md` snippet.
+- **HTTP control API (`/api/v1`)** — the CLI is a thin wrapper over a new JSON API, so plain `curl` works just as well: list services with status, get one service, start/stop/restart, send a signal, read or clear the log buffer, and start-all/stop-all. `GET /api/v1` returns a self-describing route index and `GET /api/v1/health` a reachability probe. Failures return a non-2xx status plus `{"ok":false,"error":{"code","message"}}` with a closed set of machine-readable `code` values to branch on. The existing `GET /api/services-config` endpoint and the WebSocket are unchanged.
+- **Start and restart report the real outcome** — `POST …/start` and `…/restart` block until the service settles, so the response says whether it actually came up rather than just "accepted" (pass `{"wait":false}` for fire-and-forget, which returns `202`). This is what lets the CLI produce a truthful exit code. Because a start with hooks can legitimately take `beforeStartTimeout + startTimeout + afterStartTimeout`, the CLI applies no client-side deadline to the start-like commands.
+- **Log reads expose the ring buffer honestly** — `GET …/logs` supports `limit` (the tail, default 100), `since`, `logType`, and `format=text`, and reports `bufferSize`, `bufferLimit`, and `truncated` so a poller knows when older lines have already been evicted. Multi-line output chunks are expanded so every printed line carries its own timestamp prefix and stays greppable.
+- **CSRF guards, no tokens** — a REST API is reachable from a web page in a way a WebSocket isn't, so mutating requests must send `Content-Type: application/json` (a cross-origin POST can't then slip through as a CORS "simple request") and a request with a cross-origin `Origin` header is refused. No `Access-Control-Allow-*` headers are ever sent. The trust model is otherwise unchanged and documented: the control API is exactly as trusted as the web UI, which is why the default binding is `localhost`.
+- `ServiceManager` methods that previously swallowed their outcome into the log stream now also return it, which is what the API reports: `sendSignal` returns why it did or didn't deliver (distinguishing an undeclared signal from a stopped service), `startAllServices`/`stopAllServices` return the counts they already broadcast (plus a `ran` flag, so "another Start All is in progress" is distinguishable from "nothing started"), and `restartService` returns whether the service came back up. These only widen return types — every existing caller ignores the value, so behavior is unchanged.
+
+### Fixes
+
+- Fixed the frontend build failing with `Cannot find namespace 'NodeJS'` in `useWebSocket.ts`. The frontend package has no `@types/node`, and this code runs in the browser where `setTimeout` returns a number, so the ref is now typed `ReturnType<typeof setTimeout>`.
+
+### Tests
+
+- Added `api-router.test.ts` (30 tests) covering the route table, the error envelope and status codes, blocking vs. `wait:false` starts, signal refusals (`422` undeclared vs. `409` not running), log `limit`/`since`/`logType`/`format=text`, the `415`/`403` guards, and that `GET /api/services-config` is byte-compatible. Includes a regression test asserting no response ever contains `env`, `command`, `cwd`, or the process handle — the internal `Service` holds a live `ChildProcess` and the resolved environment, so every response is built through an explicit mapper rather than by serializing it.
+- Added `run.test.ts` (29 tests) driving the CLI against a real dashboard, asserting exit codes and captured stdout/stderr. All CLI logic lives in `run(argv, io)` with output and environment injected, so no test spawns a child process.
+- Added `ServiceManager` tests for the widened return values, including the paths HTTP can't reach (a Start All declined during shutdown, a restart of an unknown service).
+- New tests find a free port by binding `127.0.0.1:0` rather than using `get-port`, which probes `::` and throws outright on hosts without IPv6.
+
+### Build / tooling
+
+- `tsup` now builds two entries: the library (`dist/index.js`) and the CLI (`dist/bin.js`, with its shebang preserved). Type declarations are still emitted only for the library. The CLI bundle imports nothing but `node:` builtins — no `ws` or `mime-types` on its path.
+- The CLI's version is injected at build time rather than importing `package.json`, which `rootDir: "src"` puts outside the TypeScript program. Running from source reports `0.0.0-dev`.
+- Extended the ESLint config to cover `src/cli/**` and `src/shared/**`; both were previously outside every TypeScript block and so went unlinted.

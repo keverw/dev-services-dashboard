@@ -1,4 +1,4 @@
-# Dev Services Dashboard v1.0.0
+# Dev Services Dashboard v1.1.0
 
 [![npm version](https://badge.fury.io/js/dev-services-dashboard.svg)](https://badge.fury.io/js/dev-services-dashboard)
 
@@ -31,6 +31,14 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
     - [Creating a Custom Logger](#creating-a-custom-logger)
     - [Disabling Logging](#disabling-logging)
 - [Example](#example)
+- [CLI & Control API](#cli--control-api)
+  - [How it fits together](#how-it-fits-together)
+  - [Connecting](#connecting)
+  - [Commands](#commands)
+  - [Exit codes](#exit-codes)
+  - [HTTP control API](#http-control-api)
+  - [Security](#security)
+  - [Using with AI agents](#using-with-ai-agents)
 - [Demo](#demo)
 - [Development](#development)
   - [Project Structure](#project-structure)
@@ -67,6 +75,7 @@ Perfect for local development where you need to run multiple interdependent serv
 - **Web Links**: Quick access buttons to related URLs (docs, admin panels, health checks, etc.)
 - **Connection Status**: Clear indication of connection state with automatic reconnection
 - **Responsive Design**: Works on desktop and mobile devices
+- **CLI & HTTP Control API**: Do everything the UI can from a terminal — `dsd status`, `dsd logs api --lines 50`, `dsd restart api` — with JSON output and meaningful exit codes, so scripts and AI coding agents can drive your dev stack without a browser. See [CLI & Control API](#cli--control-api)
 
 ## Usage
 
@@ -177,7 +186,7 @@ The `startDevServicesDashboard` function accepts a configuration object with the
 
 **Note**: All numeric options treat any non-positive or non-finite value (`0`, a negative number, or `NaN`) as "unset" and fall back to their defaults: `port` (`4000`), `maxLogLines` (`200`), `stopTimeout` (`5000`), `startTimeout` (`10000`), and `beforeStartTimeout` / `afterStartTimeout` (`60000`), including the per-service `stopTimeout`. So there's no way to disable the log buffer with `maxLogLines: 0` (use a small positive number instead) or to force an immediate `SIGKILL` with `stopTimeout: 0`, and a stray negative value can't empty the buffer or collapse a timeout to `0ms`. Likewise, an empty, whitespace-only, or non-string `hostname` or `dashboardName` falls back to its default (`localhost` and `Dev Services Dashboard` respectively), and a valid one is trimmed of surrounding whitespace.
 
-> **⚠️ Binding & network exposure**: `hostname` defaults to `localhost` (the loopback interface, `127.0.0.1`/`::1`), which only accepts connections from your own machine, so other devices on the network can't reach it. Set it to `0.0.0.0` (bind **all** interfaces) or a specific interface IP to make the dashboard reachable from other devices on your LAN, but the dashboard has **no authentication** and can start, stop, and signal arbitrary processes on the host, so only expose it on a network you trust. (Note: `0.0.0.0` is the _most_ exposed binding, not the most private. It's the opposite of `localhost`.)
+> **⚠️ Binding & network exposure**: `hostname` defaults to `localhost` (the loopback interface, `127.0.0.1`/`::1`), which only accepts connections from your own machine, so other devices on the network can't reach it. Set it to `0.0.0.0` (bind **all** interfaces) or a specific interface IP to make the dashboard reachable from other devices on your LAN, but the dashboard has **no authentication** — not on the web UI, not on the WebSocket, and not on the [HTTP control API](#cli--control-api) — and can start, stop, and signal arbitrary processes on the host, so only expose it on a network you trust. (Note: `0.0.0.0` is the _most_ exposed binding, not the most private. It's the opposite of `localhost`.)
 
 #### Storing Config in Separate Files
 
@@ -629,6 +638,143 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 ```
 
+## CLI & Control API
+
+Everything the web UI can do — list services, check status, start/stop/restart, read logs, send signals — is also available from the terminal, over an HTTP control API and a bundled `dsd` command. This exists mainly so **scripts and AI coding agents can drive your dev stack** without a browser: an agent can ask whether the API server is running, read the last 50 lines after a crash, and restart it after editing the code.
+
+### How it fits together
+
+The CLI is a **client for a dashboard that is already running**. It does not start the dashboard and does not read your config — you keep booting it however you do today (`bun run dev`), and the CLI talks to that process:
+
+```bash
+# Terminal 1 — your usual runner script
+bun run dev
+
+# Terminal 2 (or your agent)
+dsd status
+```
+
+This is deliberate: your service config is TypeScript containing `beforeStart` / `afterStart` **functions**, which no standalone config file could express. Pointing the CLI at the live dashboard keeps one source of truth.
+
+Both `dev-services-dashboard` and the shorter `dsd` are installed as binaries. With a local install, run them via `bunx dsd …` / `npx dsd …`, or add a script to your `package.json`.
+
+### Connecting
+
+The dashboard URL is resolved in this order:
+
+1. `--url http://localhost:4000`
+2. `$DEV_SERVICES_DASHBOARD_URL`
+3. `$DSD_URL`
+4. `http://localhost:4000` (the library's own default)
+
+### Commands
+
+| Command                           | What it does                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------ |
+| `dsd status` (`ls`, `list`, `ps`) | Table of every service with status, pid, and log count                         |
+| `dsd status <service>`            | One service in detail                                                          |
+| `dsd status [<service>] --check`  | Exit `3` unless it's running — for `dsd status api --check \|\| dsd start api` |
+| `dsd start <service>`             | Start it and **wait** for the outcome                                          |
+| `dsd stop <service>`              | Stop it and wait for it to terminate                                           |
+| `dsd restart <service>`           | Restart it and wait for it to come back up                                     |
+| `dsd start-all` / `dsd stop-all`  | Start/stop everything in (reverse) dependency order                            |
+| `dsd logs <service>`              | Buffered log lines, newest last                                                |
+| `dsd clear-logs <service>`        | Clear a service's log buffer                                                   |
+| `dsd signal <service> <SIGNAL>`   | Send a signal the service declares in `signals`                                |
+| `dsd health` (`ping`)             | Check a dashboard is reachable                                                 |
+| `dsd help [<command>]`            | Help; `dsd help --json` emits the full machine-readable manifest               |
+
+Useful flags: `--json` (machine-readable output), `--lines <n>`, `--type stdout,stderr,system`, `--since <epoch-ms>`, `--plain` (bare log lines, no timestamp prefix), `--no-wait`, `--timeout <ms>`, `--no-color`.
+
+```bash
+dsd status
+dsd logs api --lines 50 --type stderr
+dsd restart api && dsd status api
+dsd signal api SIGHUP
+```
+
+### Exit codes
+
+The real contract for scripts and agents — output wording may change, these won't:
+
+| Code | Meaning                                                                    |
+| ---- | -------------------------------------------------------------------------- |
+| `0`  | Success                                                                    |
+| `1`  | Internal error                                                             |
+| `2`  | Usage error (unknown command or flag, missing argument)                    |
+| `3`  | Operation failed (didn't start, `--check` failed, a bulk run had failures) |
+| `4`  | No such service                                                            |
+| `5`  | Dashboard unreachable                                                      |
+| `6`  | Dashboard is shutting down                                                 |
+| `7`  | Signal not allowed (not declared in the service's `signals`)               |
+| `8`  | Unexpected API response                                                    |
+
+Under `--json`, successful output is a single JSON object on **stdout**, and errors are JSON on **stderr** (`{"ok":false,"error":{"code","message"},"exitCode":N}`), so stdout stays clean for piping.
+
+### HTTP control API
+
+The CLI is a thin wrapper over `/api/v1`, so plain `curl` works just as well — handy for an agent that doesn't have the CLI installed.
+
+| Method   | Path                                     | Notes                                                   |
+| -------- | ---------------------------------------- | ------------------------------------------------------- |
+| `GET`    | `/api/v1`                                | Self-describing route index                             |
+| `GET`    | `/api/v1/health`                         | `{dashboardName, shuttingDown, serviceCount, uptimeMs}` |
+| `GET`    | `/api/v1/services`                       | Every service with its status                           |
+| `GET`    | `/api/v1/services/:id`                   | One service                                             |
+| `POST`   | `/api/v1/services/:id/start`             | Body `{"wait":false}` to return immediately (`202`)     |
+| `POST`   | `/api/v1/services/:id/stop`              |                                                         |
+| `POST`   | `/api/v1/services/:id/restart`           | Body `{"wait":false}` supported                         |
+| `POST`   | `/api/v1/services/:id/signal`            | Body `{"signal":"SIGHUP"}`                              |
+| `GET`    | `/api/v1/services/:id/logs`              | Query: `limit`, `since`, `logType`, `format=text`       |
+| `DELETE` | `/api/v1/services/:id/logs`              | Clear the buffer                                        |
+| `POST`   | `/api/v1/start-all` / `/api/v1/stop-all` | Returns the run's counts                                |
+
+```bash
+curl localhost:4000/api/v1/services
+curl 'localhost:4000/api/v1/services/api/logs?limit=50&format=text'
+curl -X POST -H 'Content-Type: application/json' localhost:4000/api/v1/services/api/restart
+```
+
+**`Content-Type: application/json` is required on every POST** (see Security below) — a POST without it is rejected with `415`.
+
+Failures return a non-2xx status and `{"ok":false,"error":{"code","message"}}`. Branch on `error.code`, not the message: `service_not_found`, `start_failed`, `stop_failed`, `service_not_running`, `start_all_busy`, `signal_not_allowed`, `shutting_down`, `bad_request`, `not_found`, `method_not_allowed`, `unsupported_media_type`, `forbidden_origin`, `internal_error`.
+
+Two behaviors worth knowing:
+
+- **`start` and `restart` block by default** until the service settles, so the response reflects the real outcome rather than "accepted". With hooks configured that can take up to `beforeStartTimeout + startTimeout + afterStartTimeout` (~130s with the defaults), which is why the CLI applies no client-side deadline to these commands. Pass `{"wait":false}` for fire-and-forget.
+- **A start "succeeds" once the process spawns.** A service that exits immediately afterwards will report success and then show `error` on the next `status` — the same semantics the web UI's Start All has always had. If a fast-exiting service matters to you, follow a start with `dsd status <service> --check`.
+- **The log buffer is a ring buffer** capped at `maxLogLines`. A logs response includes `bufferSize`, `bufferLimit`, and `truncated`; when `truncated` is true, older lines have already been evicted, so a `since`-based poller may have missed some.
+
+### Security
+
+The control API has **no authentication** and is exactly as trusted as the web UI: anything that can reach the port can start, stop, and signal processes on your machine. That's fine for the default `localhost` binding, and is the same reason the [binding warning](#configuration-options) tells you not to expose the dashboard on an untrusted network.
+
+Because a REST API is reachable from a web page in a way a WebSocket isn't, two guards are applied to mutating requests — neither involves tokens:
+
+- `Content-Type: application/json` is required, so a cross-origin POST can't slip through as a CORS "simple request".
+- A request carrying a cross-origin `Origin` header is refused with `403`.
+
+No `Access-Control-Allow-*` headers are ever sent.
+
+### Using with AI agents
+
+Point an agent at the CLI by dropping something like this into your `AGENTS.md` / `CLAUDE.md`:
+
+```markdown
+## Dev services
+
+Local services run under a Dev Services Dashboard on http://localhost:4000.
+Control them with the `dsd` CLI (add `--json` for machine-readable output):
+
+- `dsd status` — list services and their status
+- `dsd logs <service> --lines 50` — recent output
+- `dsd restart <service>` — restart after changing its code
+- `dsd status <service> --check` — exit 0 only if it is running
+
+Exit codes: 0 ok, 2 usage, 3 failed, 4 no such service, 5 dashboard unreachable.
+Run `dsd help --json` for the full command manifest.
+```
+
 ## Demo
 
 Want to see Dev Services Dashboard in action? We've included a demo with simulated services:
@@ -733,5 +879,7 @@ If you're consuming frames yourself, the server also emits an `error_from_server
 
 ## Future Goals
 
-- **Headless Mode**: Support running Dev Services Dashboard without serving the web interface, ideal for building IDE extensions or integrating with other development tools
+- **Headless Mode**: An [HTTP control API and CLI](#cli--control-api) now cover the scripting/integration half of this. What's still open is a `serveUI: false` option to run the dashboard without serving the web interface at all
+- **Follow mode for logs**: `dsd logs -f` to stream new lines as they arrive (likely via Server-Sent Events, so plain `curl -N` works too). Today the CLI reads the buffer with `--lines`/`--since`
+- **Writing to a service's stdin**: services are spawned with stdin closed (`"ignore"`), so there's no way to type into a running process. Enabling it needs an opt-in per-service flag, a write path through the manager, and API/UI surface — interactive prompts would additionally need a pty
 - **Authentication & Security**: Currently designed for local development environments without authentication. Future versions could include optional authentication mechanisms for team environments or remote access scenarios

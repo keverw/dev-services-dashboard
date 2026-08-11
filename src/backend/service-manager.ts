@@ -5,6 +5,42 @@ import type { LogEntry, ServerMessage } from "@shared/protocol";
 import { Logger } from "./logger";
 
 /**
+ * Why a `sendSignal` call did or didn't deliver. The signal path refuses for
+ * several distinct reasons that all used to be indistinguishable to a caller
+ * (they were recorded only in the service's log stream), but which the HTTP
+ * control API has to tell apart to pick a status code — an undeclared signal is
+ * a caller mistake (422) while a stopped service is a state conflict (409).
+ */
+export type SendSignalResult =
+  | "sent"
+  | "service_not_found"
+  | "not_running"
+  | "not_declared"
+  | "unknown_signal"
+  | "send_failed";
+
+/** Outcome of a "Start All" run. `ran: false` means it was declined outright. */
+export interface StartAllSummary {
+  /**
+   * False when the run never began — the dashboard is shutting down, or another
+   * Start All is already in flight. Distinguishing this from a run that started
+   * nothing matters: `{started: 0}` alone reads as "everything failed".
+   */
+  ran: boolean;
+  started: number;
+  failed: number;
+  skipped: number;
+  total: number;
+}
+
+/** Outcome of a "Stop All" run. */
+export interface StopAllSummary {
+  stopped: number;
+  failed: number;
+  total: number;
+}
+
+/**
  * Strips ANSI escape sequences from a log line. The UI renders logs as plain
  * text, so any escape sequence is just noise (or, for cursor moves / erases,
  * visible garbage). Covers:
@@ -287,6 +323,15 @@ export class ServiceManager {
 
   getServices(): Service[] {
     return this.services;
+  }
+
+  /**
+   * The configured per-service log buffer cap. Exposed so the control API can
+   * report it alongside a logs response: once the buffer is at this size, older
+   * lines have been evicted, which a timestamp-based poller needs to know.
+   */
+  getMaxLogLines(): number {
+    return this.maxLogLines;
   }
 
   /**
@@ -771,10 +816,15 @@ export class ServiceManager {
    * signal reaches the wrapper, not the underlying dev server it spawned. If you
    * need the inner process to receive it, run that process directly (or have the
    * wrapper forward signals).
+   *
+   * Returns why the call did or didn't deliver (see `SendSignalResult`). Every
+   * refusal is still logged and written to the service's log stream exactly as
+   * before; the return value just makes the reason available to callers that
+   * need to act on it (the HTTP control API maps it to a status code).
    */
-  sendSignal(serviceID: string, signal: string): void {
+  sendSignal(serviceID: string, signal: string): SendSignalResult {
     const service = this.getService(serviceID);
-    if (!service) return;
+    if (!service) return "service_not_found";
 
     if (service.status !== "running" || !service.process) {
       this.logger.warn(
@@ -787,7 +837,7 @@ export class ServiceManager {
         "system",
       );
 
-      return;
+      return "not_running";
     }
 
     // Only signals the service explicitly declared may be sent. The UI only
@@ -802,7 +852,7 @@ export class ServiceManager {
         `Refused to send undeclared signal "${signal}".`,
         "system",
       );
-      return;
+      return "not_declared";
     }
 
     // Use hasOwnProperty (not `in`) so inherited Object.prototype names like
@@ -816,13 +866,14 @@ export class ServiceManager {
         `Refused to send unknown signal "${signal}".`,
         "system",
       );
-      return;
+      return "unknown_signal";
     }
 
     try {
       service.process.kill(signal as NodeJS.Signals);
       this.logger.info(`Sent ${signal} to ${service.name}.`);
       this.addLog(serviceID, `Sent ${signal} to ${service.name}.`, "system");
+      return "sent";
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
@@ -830,6 +881,7 @@ export class ServiceManager {
         err as object,
       );
       this.addLog(serviceID, `Failed to send ${signal}: ${message}`, "system");
+      return "send_failed";
     }
   }
 
@@ -1096,12 +1148,19 @@ export class ServiceManager {
     });
   }
 
-  async restartService(serviceID: string) {
+  /**
+   * Stops the service (if anything is up) and starts it again, returning
+   * whether the start half actually reached `running` — so a caller can report
+   * a truthful outcome rather than assuming a restart succeeded. False also
+   * covers the two early returns: a restart refused during shutdown, and an
+   * unknown service ID.
+   */
+  async restartService(serviceID: string): Promise<boolean> {
     // Restart would stop then start; during shutdown the start half must not run.
-    if (this.shuttingDown) return;
+    if (this.shuttingDown) return false;
 
     const service = this.getService(serviceID);
-    if (!service) return;
+    if (!service) return false;
 
     this.logger.info(`Restarting service: ${service.name}...`);
     this.addLog(
@@ -1142,7 +1201,7 @@ export class ServiceManager {
 
     // Use the timeout-aware path so a hung beforeStart/afterStart on restart
     // can't leave the service stuck in initializing/finalizing forever.
-    await this.startAndWait(serviceID);
+    return this.startAndWait(serviceID);
   }
 
   clearServiceLogs(serviceID: string) {
@@ -1155,7 +1214,7 @@ export class ServiceManager {
     }
   }
 
-  async stopAllServices(): Promise<void> {
+  async stopAllServices(): Promise<StopAllSummary> {
     // Stop sequentially in reverse start order so dependents shut down before
     // the dependencies they rely on.
     const toStop = [...this.services]
@@ -1178,7 +1237,7 @@ export class ServiceManager {
     // confusing "0 services stopped" toast right before the socket closes.
     if (total === 0) {
       this.logger.info("All services stopped.");
-      return;
+      return { stopped: 0, failed: 0, total: 0 };
     }
 
     this.broadcastFn({ type: "stop_all_begin", total });
@@ -1212,6 +1271,8 @@ export class ServiceManager {
       this.broadcastFn({ type: "stop_all_done", stopped, failed });
       this.logger.info("All services stopped.");
     }
+
+    return { stopped, failed, total };
   }
 
   /**
@@ -1432,8 +1493,16 @@ export class ServiceManager {
    * via `start_all_begin` / `start_all_progress` / `start_all_done` so clients
    * can render it without orchestrating anything themselves.
    */
-  async startAllServices(): Promise<void> {
-    if (this.shuttingDown || this.startAllInProgress) return;
+  async startAllServices(): Promise<StartAllSummary> {
+    if (this.shuttingDown || this.startAllInProgress) {
+      return {
+        ran: false,
+        started: 0,
+        failed: 0,
+        skipped: 0,
+        total: this.services.length,
+      };
+    }
     this.startAllInProgress = true;
 
     const total = this.services.length;
@@ -1509,5 +1578,7 @@ export class ServiceManager {
         skipped: skipped.size,
       });
     }
+
+    return { ran: true, started, failed, skipped: skipped.size, total };
   }
 }

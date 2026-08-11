@@ -257,4 +257,22 @@ export type {
   StartAllResult,
   StopAllResult,
 } from "@shared/protocol";
+// The HTTP control API (`/api/v1/*`) that the bundled CLI — and any external
+// tool or agent driving the dashboard with plain `curl` — speaks. Exported so a
+// consumer can type its own client against the same shapes the server produces.
+export type {
+  ServiceSummary,
+  ApiErrorCode,
+  ApiError,
+  ApiErrorResponse,
+  ApiIndexResponse,
+  HealthResponse,
+  ServiceListResponse,
+  ServiceResponse,
+  LogsResponse,
+  ClearLogsResponse,
+  SignalResponse,
+  StartAllResponse,
+  StopAllResponse,
+} from "@shared/control-api";
 export { createConsoleLogger } from "./logger";

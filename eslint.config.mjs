@@ -10,9 +10,11 @@ import jsxA11y from "eslint-plugin-jsx-a11y";
 export default [
   js.configs.recommended,
 
-  // Backend / library TypeScript
+  // Backend / library TypeScript, the shared wire types, and the CLI. All three
+  // are plain Node-targeted TypeScript, so they share one block — without it the
+  // default (espree) parser would be used and fail on TS syntax.
   {
-    files: ["src/backend/**/*.ts"],
+    files: ["src/backend/**/*.ts", "src/cli/**/*.ts", "src/shared/**/*.ts"],
     languageOptions: {
       parser: tsParser,
       parserOptions: { sourceType: "module" },

@@ -3,12 +3,14 @@ import { ServiceManager } from "./service-manager";
 import { Logger } from "./logger";
 import { createVFSMiddleware } from "./vfs-middleware";
 import frontendVFS from "./frontend-vfs";
+import { ApiRouter } from "./api-router";
 
 export class HttpHandler {
   private serviceManager: ServiceManager;
   private vfsMiddleware: (req: IncomingMessage, res: ServerResponse) => boolean;
   private logger: Logger;
   private dashboardName: string;
+  private apiRouter: ApiRouter;
 
   constructor(
     logger: Logger,
@@ -21,13 +23,23 @@ export class HttpHandler {
     this.vfsMiddleware = createVFSMiddleware(frontendVFS, {
       excludedPaths: ["/api/services-config"],
     });
+    this.apiRouter = new ApiRouter(logger, serviceManager, this.dashboardName);
   }
 
   async handleRequest(req: IncomingMessage, res: ServerResponse) {
     const url = new URL(req.url!, `http://${req.headers.host}`);
 
     try {
-      // First try to handle with VFS middleware
+      // The control API goes first, before the VFS middleware. It has to: the
+      // VFS's `excludedPaths` is an exact-match list, so a `/api/v1/*` prefix
+      // can't be excluded there, and the API needs methods (POST/DELETE) and
+      // JSON error bodies the static middleware doesn't deal in.
+      if (ApiRouter.handles(url.pathname)) {
+        await this.apiRouter.handle(req, res, url);
+        return;
+      }
+
+      // Then try to handle with VFS middleware
       if (this.vfsMiddleware(req, res)) {
         return; // Request was handled by VFS middleware
       }
