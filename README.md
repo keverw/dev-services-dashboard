@@ -69,7 +69,7 @@ Perfect for local development where you need to run multiple interdependent serv
 
 - **Real-time Logs**: View service logs as they happen. ANSI escape sequences (CSI and OSC), color/style as well as cursor moves and clear-line/clear-screen "spam" are stripped, since logs are rendered as plain text
 - **Log Management**: Clear a service's log buffer from the UI ("Clear Logs"). This clears it on the server and for all connected clients (a single `Log buffer cleared by user.` system line is then written in its place)
-- **Service Controls**: Start, stop, restart services individually or all at once ("Start All" / "Stop All"). A stop that's dragging on can be escalated — the Stop button becomes "Force Stop" while one is in flight, skipping the grace period and killing the process group outright
+- **Service Controls**: Start, stop, restart services individually or all at once ("Start All" / "Stop All"). A stop that's dragging on can be escalated — the Stop button becomes "Force Stop" while one is in flight, and "Stop All" likewise becomes "Force Stop All", skipping the grace period and killing the process group outright
 - **Status Monitoring**: Visual indicators for service status
 - **Startup Ordering**: Declare `dependsOn` so services start in dependency order (and stop in reverse)
 - **Custom Signals**: Send declared POSIX signals (`SIGHUP`, `SIGUSR1`, …) to a running service from the UI
@@ -863,6 +863,29 @@ The demo includes simulated services that generate realistic logs:
 - **Database Server**: SQL queries, connection management, and maintenance logs
 - **API Server**: HTTP requests, middleware activity, and error scenarios
 - **SSR Server**: Page rendering, hot reload, and build processes
+- **Stubborn Service**: Ignores `SIGTERM` and keeps running, with a 15s `stopTimeout`
+
+The stubborn service exists so you can actually see the stop escalation paths. Every other demo service exits on the first `SIGTERM`, so `stopping` flashes past and there's nothing to escalate. Start it, press **Stop**, and the button becomes a pulsing **Force Stop** for the 15 seconds it sits wedged (press **Stop All** instead and the header button becomes **Force Stop All**). From the terminal:
+
+```bash
+bun run dsd start stubborn
+bun run dsd stop stubborn            # waits out the full 15s grace period
+bun run dsd stop stubborn --force    # SIGKILL now, returns in well under a second
+bun run dsd stop stubborn --grace 300
+```
+
+> **`bun run dsd` is a repo-only thing.** It's the `dsd` script in this project's `package.json`, which runs the CLI straight from TypeScript source so there's no build step between an edit and a test. In a project that installed the package, the command is just `dsd …` (or `bunx dsd …` / `npx dsd …` for a local install), as in the rest of this README.
+
+With the demo running, a second terminal can drive it with the CLI straight from source (no build step), which is the easiest way to try or develop the `dsd` commands:
+
+```bash
+bun run dsd status
+bun run dsd start api
+bun run dsd logs api --lines 20
+bun run dsd restart api --grace 300
+```
+
+The demo listens on the CLI's default URL (http://localhost:4000), so no `--url` is needed. Running from source reports version `0.0.0-dev` since the real version is only injected at build time.
 
 Open http://localhost:4000 to explore the dashboard and try features like starting/stopping services, viewing real-time logs, "Start All" / "Stop All" (the demo wires up `dependsOn` so services come up in order), sending a custom signal to a running service, watching the API server's `beforeStart` warm-up (`initializing`) step, and the database's `afterStart` readiness/migration (`finalizing`) step.
 
@@ -885,6 +908,9 @@ bun run demo
 
 # Develop the React frontend with hot reload
 bun run dev-frontend
+
+# Run the dsd CLI from source against a running dashboard (e.g. the demo)
+bun run dsd status
 ```
 
 **Note**: The React frontend is built using Vite and then bundled into a Virtual File System (VFS) during the build process. The generated `src/backend/frontend-vfs.ts` file is git-ignored as it's a build artifact, but it's required for the server to run. The demo command automatically builds the React frontend and generates this file before starting.
