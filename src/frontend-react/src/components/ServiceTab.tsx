@@ -11,7 +11,8 @@ interface ServiceTabProps {
   logs: string;
   autoScroll: boolean;
   onStart: () => void;
-  onStop: () => void;
+  /** `force` is true when escalating a stop that's already in flight. */
+  onStop: (force?: boolean) => void;
   onRestart: () => void;
   onClearLogs: () => void;
   onToggleAutoScroll: () => void;
@@ -62,13 +63,17 @@ function ServiceTab({
     currentStatus === "starting" ||
     currentStatus === "finalizing" ||
     currentStatus === "stopping";
-  const isStopDisabled =
-    !connected ||
-    currentStatus === "stopped" ||
-    currentStatus === "error" ||
-    currentStatus === "crashed" ||
-    currentStatus === "starting" ||
-    currentStatus === "stopping";
+  // While a stop is in flight the button becomes "Force Stop" rather than going
+  // dead: a service wedged in `stopping` (waiting out its `stopTimeout`, or
+  // ignoring SIGTERM entirely) is exactly when you want to escalate to SIGKILL.
+  const isStopping = currentStatus === "stopping";
+  const isStopDisabled = isStopping
+    ? !connected
+    : !connected ||
+      currentStatus === "stopped" ||
+      currentStatus === "error" ||
+      currentStatus === "crashed" ||
+      currentStatus === "starting";
   const isRestartDisabled =
     !connected ||
     currentStatus === "initializing" ||
@@ -146,12 +151,16 @@ function ServiceTab({
           </button>
           <button
             id={`${service.id}-stop`}
-            className="stop-button"
-            title={`Stop ${service.name}`}
-            onClick={onStop}
+            className={isStopping ? "stop-button force-stop" : "stop-button"}
+            title={
+              isStopping
+                ? `Force stop ${service.name} — SIGKILL now, without waiting out the grace period`
+                : `Stop ${service.name}`
+            }
+            onClick={() => onStop(isStopping)}
             disabled={isStopDisabled}
           >
-            Stop
+            {isStopping ? "Force Stop" : "Stop"}
           </button>
           <button
             id={`${service.id}-restart`}

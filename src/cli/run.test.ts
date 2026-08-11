@@ -158,6 +158,24 @@ describe("CLI", () => {
       expect(JSON.parse(stdout).service.status).toBe("stopped");
     });
 
+    it("stop --force works and reports the service stopped", async () => {
+      await cli("start", "api");
+
+      const { code, stdout } = await cli("stop", "api", "--force");
+      expect(code).toBe(EXIT.OK);
+      expect(stdout).toContain("stopped");
+
+      const detail = await cli("status", "api", "--json");
+      expect(JSON.parse(detail.stdout).service.status).toBe("stopped");
+    });
+
+    it("documents --force under `stop --help`", async () => {
+      const { code, stdout } = await cli("stop", "--help");
+      expect(code).toBe(EXIT.OK);
+      expect(stdout).toContain("--force");
+      expect(stdout).toContain("SIGKILL");
+    });
+
     it("start-all and stop-all report counts", async () => {
       const up = await cli("start-all");
       expect(up.code).toBe(EXIT.OK);

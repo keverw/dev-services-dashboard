@@ -105,5 +105,16 @@ export type ServerMessage =
 export type ClientMessage =
   | { action: "start_all" }
   | { action: "stop_all" }
-  | { action: "start" | "stop" | "restart" | "clear_logs"; serviceID: string }
+  | { action: "start" | "restart" | "clear_logs"; serviceID: string }
+  | {
+      action: "stop";
+      serviceID: string;
+      /**
+       * Skip the graceful phase and SIGKILL the process immediately, instead of
+       * SIGTERM followed by the service's `stopTimeout` grace period. Also
+       * accepted while the service is already `stopping`, where it cuts short
+       * the grace period of the stop already in flight.
+       */
+      force?: boolean;
+    }
   | { action: "send_signal"; serviceID: string; signal: string };

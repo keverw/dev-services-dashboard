@@ -35,6 +35,7 @@ A lightweight development UI dashboard for managing and monitoring multiple serv
   - [How it fits together](#how-it-fits-together)
   - [Connecting](#connecting)
   - [Commands](#commands)
+  - [Stopping a stuck service](#stopping-a-stuck-service)
   - [Following logs](#following-logs)
   - [Exit codes](#exit-codes)
   - [HTTP control API](#http-control-api)
@@ -67,7 +68,7 @@ Perfect for local development where you need to run multiple interdependent serv
 
 - **Real-time Logs**: View service logs as they happen. ANSI escape sequences (CSI and OSC), color/style as well as cursor moves and clear-line/clear-screen "spam" are stripped, since logs are rendered as plain text
 - **Log Management**: Clear a service's log buffer from the UI ("Clear Logs"). This clears it on the server and for all connected clients (a single `Log buffer cleared by user.` system line is then written in its place)
-- **Service Controls**: Start, stop, restart services individually or all at once ("Start All" / "Stop All")
+- **Service Controls**: Start, stop, restart services individually or all at once ("Start All" / "Stop All"). A stop that's dragging on can be escalated — the Stop button becomes "Force Stop" while one is in flight, skipping the grace period and killing the process group outright
 - **Status Monitoring**: Visual indicators for service status
 - **Startup Ordering**: Declare `dependsOn` so services start in dependency order (and stop in reverse)
 - **Custom Signals**: Send declared POSIX signals (`SIGHUP`, `SIGUSR1`, …) to a running service from the UI
@@ -484,7 +485,7 @@ If the hook **throws**, the just-started process is torn back down (it's already
 
 #### Process Termination
 
-Stopping a service sends `SIGTERM`, then escalates to `SIGKILL` if it hasn't exited within the stop timeout (default 5000ms, configurable globally via `stopTimeout` or per service via `stopTimeout`).
+Stopping a service sends `SIGTERM`, then escalates to `SIGKILL` if it hasn't exited within the stop timeout (default 5000ms, configurable globally via `stopTimeout` or per service via `stopTimeout`). You can also skip the grace period entirely and escalate immediately — see [Stopping a stuck service](#stopping-a-stuck-service) for the UI's "Force Stop" button and `dsd stop --force`.
 
 > **Note:** **Restart** tears down whatever is in flight first: a live process (including one still coming up in `starting`/`finalizing`), or an in-flight `beforeStart` hook (`initializing`), which it aborts. An already `stopped`/`error`/`crashed` service it just starts. After tearing down a live process it waits a brief fixed settle pause (500ms) before starting again, giving the OS time to release the old process's resources (e.g. its listening port) so the fresh process doesn't immediately hit `EADDRINUSE` on a fast restart. (Restarting from `initializing` has no process to release, so that pause is skipped.)
 
@@ -677,6 +678,7 @@ The dashboard URL is resolved in this order:
 | `dsd status [<service>] --check`  | Exit `3` unless it's running — for `dsd status api --check \|\| dsd start api` |
 | `dsd start <service>`             | Start it and **wait** for the outcome                                          |
 | `dsd stop <service>`              | Stop it and wait for it to terminate                                           |
+| `dsd stop <service> --force`      | Skip the grace period and SIGKILL it now                                       |
 | `dsd restart <service>`           | Restart it and wait for it to come back up                                     |
 | `dsd start-all` / `dsd stop-all`  | Start/stop everything in (reverse) dependency order                            |
 | `dsd logs <service>`              | Buffered log lines, newest last                                                |
@@ -686,7 +688,7 @@ The dashboard URL is resolved in this order:
 | `dsd health` (`ping`)             | Check a dashboard is reachable                                                 |
 | `dsd help [<command>]`            | Help; `dsd help --json` emits the full machine-readable manifest               |
 
-Useful flags: `--json` (machine-readable output), `-f`/`--follow`, `--lines <n>`, `--type stdout,stderr,system`, `--since <epoch-ms>`, `--plain` (bare log lines, no timestamp prefix), `--no-wait`, `--timeout <ms>`, `--no-color`.
+Useful flags: `--json` (machine-readable output), `-f`/`--follow`, `--lines <n>`, `--type stdout,stderr,system`, `--since <epoch-ms>`, `--plain` (bare log lines, no timestamp prefix), `--force`, `--no-wait`, `--timeout <ms>`, `--no-color`.
 
 ```bash
 dsd status
@@ -695,6 +697,22 @@ dsd logs api -f
 dsd restart api && dsd status api
 dsd signal api SIGHUP
 ```
+
+### Stopping a stuck service
+
+A normal stop sends `SIGTERM`, waits out the service's `stopTimeout` (5s by default, overridable per service), and only then escalates to `SIGKILL`. That's the right default, but it means a process that ignores `SIGTERM` leaves you watching a `stopping` spinner for the whole grace period.
+
+`--force` skips straight to `SIGKILL` on the process group, after the same escaped-descendant sweep the timeout path does:
+
+```bash
+dsd stop api --force
+```
+
+It also works on a service **already** stuck in `stopping` — that's the case it really exists for. Rather than starting a second stop, it cuts short the grace period of the one already in flight, and the original caller settles normally too.
+
+The web UI mirrors this: while a stop is in flight, the **Stop** button becomes a pulsing **Force Stop** instead of greying out, sending the same request. `POST /api/v1/services/:id/stop` takes `{"force": true}`.
+
+> Note this is different from sending `SIGKILL` through the signals dropdown (or `dsd signal`). Signals must be declared in the service's `signals` config, are delivered only to the main process, and don't move the service to `stopping` or reap escaped descendants. A force stop is a stop — it just skips the polite phase.
 
 ### Following logs
 
@@ -745,7 +763,7 @@ The CLI is a thin wrapper over `/api/v1`, so plain `curl` works just as well —
 | `GET`    | `/api/v1/services`                       | Every service with its status                           |
 | `GET`    | `/api/v1/services/:id`                   | One service                                             |
 | `POST`   | `/api/v1/services/:id/start`             | Body `{"wait":false}` to return immediately (`202`)     |
-| `POST`   | `/api/v1/services/:id/stop`              |                                                         |
+| `POST`   | `/api/v1/services/:id/stop`              | Body `{"force":true}` to SIGKILL immediately            |
 | `POST`   | `/api/v1/services/:id/restart`           | Body `{"wait":false}` supported                         |
 | `POST`   | `/api/v1/services/:id/signal`            | Body `{"signal":"SIGHUP"}`                              |
 | `GET`    | `/api/v1/services/:id/logs`              | Query: `limit`, `since`, `logType`, `format=text`       |

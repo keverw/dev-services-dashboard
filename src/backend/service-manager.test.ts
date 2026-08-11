@@ -1823,3 +1823,65 @@ describe("restartService return value", () => {
     expect(await sm.restartService("a")).toBe(false);
   });
 });
+
+// --- Force stop ------------------------------------------------------------
+
+describe("force stop", () => {
+  it("sends SIGKILL immediately instead of SIGTERM", async () => {
+    const { sm } = makeManager([svc("a")]);
+    await startAndRun(sm, "a");
+
+    killLog.length = 0;
+    await sm.stopService("a", { force: true });
+
+    // No graceful phase at all: the very first signal is the kill.
+    expect(killLog.length).toBeGreaterThan(0);
+    expect(killLog[0].signal).toBe("SIGKILL");
+    expect(killLog.some((k) => k.signal === "SIGTERM")).toBe(false);
+    expect(sm.getService("a")!.status).toBe("stopped");
+  });
+
+  it("still sends SIGTERM first without the flag", async () => {
+    const { sm } = makeManager([svc("a")]);
+    await startAndRun(sm, "a");
+
+    killLog.length = 0;
+    await sm.stopService("a");
+
+    expect(killLog[0].signal).toBe("SIGTERM");
+  });
+
+  it("escalates a stop already in flight, and settles it once", async () => {
+    // A service that ignores SIGTERM wedges in `stopping` until its stopTimeout
+    // elapses — the case Force Stop exists for.
+    const { sm } = makeManager([svc("a", { stopTimeout: 60_000 })], {
+      timeouts: { stopTimeout: 60_000 },
+    });
+    await startAndRun(sm, "a");
+    spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
+
+    killLog.length = 0;
+    const graceful = sm.stopService("a");
+    await tick();
+
+    expect(sm.getService("a")!.status).toBe("stopping");
+    expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(false);
+
+    // The forced call must escalate the existing stop rather than start a
+    // second one — and the original caller's promise must still resolve.
+    const forced = sm.stopService("a", { force: true });
+    await Promise.all([graceful, forced]);
+
+    expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(true);
+    expect(sm.getService("a")!.status).toBe("stopped");
+  });
+
+  it("is a no-op on an already-stopped service", async () => {
+    const { sm } = makeManager([svc("a")]);
+    killLog.length = 0;
+
+    await sm.stopService("a", { force: true });
+    expect(killLog).toHaveLength(0);
+    expect(sm.getService("a")!.status).toBe("stopped");
+  });
+});

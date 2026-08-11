@@ -170,6 +170,15 @@ export class ServiceManager {
   // which could later fire `failStartOnTimeout` against an already-`running`
   // service and wrongly tear it down).
   private inFlightStarts = new Map<string, Promise<boolean>>();
+  // In-flight `stopService` runs, keyed by serviceID. Held so a *forced* stop
+  // arriving while a graceful one is still waiting out its `stopTimeout` can
+  // escalate that run to SIGKILL immediately and share its promise, instead of
+  // starting a second stop — which would detach the first run's `exit` listener
+  // and leave its caller awaiting a promise that never settles.
+  private inFlightStops = new Map<
+    string,
+    { promise: Promise<void>; escalate: () => void }
+  >();
   private startAllInProgress = false;
   // Latched true when the dashboard server begins shutting down (DevUIServer
   // stop()). Once set, every start path refuses, so neither a late client
@@ -1003,13 +1012,33 @@ export class ServiceManager {
    * Stops a running service. `opts.finalStatus` lets an internal caller settle
    * the service on a status other than `stopped` once the process has exited
    * (the `afterStart` failure path uses `error`); external callers omit it.
+   *
+   * `opts.force` skips the graceful phase: instead of SIGTERM followed by a
+   * `stopTimeout` grace period, the process group is SIGKILLed immediately
+   * (after the same escaped-descendant sweep the timeout path does). It is also
+   * accepted while a service is already `stopping`, where it cuts short the
+   * grace period of the stop already in flight — that wedged case is the main
+   * reason to reach for it.
    */
   async stopService(
     serviceID: string,
-    opts: { finalStatus?: Service["status"]; errorDetails?: string } = {},
+    opts: {
+      finalStatus?: Service["status"];
+      errorDetails?: string;
+      force?: boolean;
+    } = {},
   ): Promise<void> {
     const service = this.getService(serviceID);
     if (!service) return;
+
+    // Escalate an in-flight graceful stop rather than starting a second one.
+    if (opts.force && service.status === "stopping") {
+      const inFlight = this.inFlightStops.get(serviceID);
+      if (inFlight) {
+        inFlight.escalate();
+        return inFlight.promise;
+      }
+    }
 
     // If a post-start hook is still running, abort it so it bails out. The
     // process is already live, so fall through to the normal kill path below.
@@ -1052,9 +1081,19 @@ export class ServiceManager {
 
     this.logger.info(`Stopping service: ${service.name}...`);
     this.setStatus(serviceID, "stopping");
-    this.addLog(serviceID, `Attempting to stop ${service.name}...`, "system");
+    this.addLog(
+      serviceID,
+      opts.force
+        ? `Force-stopping ${service.name}...`
+        : `Attempting to stop ${service.name}...`,
+      "system",
+    );
 
-    return new Promise((resolve) => {
+    // Assigned by the promise executor (which runs synchronously) so the
+    // in-flight entry registered just below can expose it.
+    let escalateStop: () => void = () => {};
+
+    const run = new Promise<void>((resolve) => {
       if (!service.process) {
         const finalStatus = opts.finalStatus ?? "stopped";
         const finalErrorDetails = opts.finalStatus
@@ -1116,36 +1155,76 @@ export class ServiceManager {
         resolve();
       });
 
+      // Declared before `escalate` so the closure can clear it; assigned below.
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      let escalated = false;
+
+      /**
+       * Jump to SIGKILL. Reached either by the grace period expiring or by a
+       * force stop (at request time, or arriving mid-stop). Guarded so the two
+       * can't both fire.
+       */
+      const escalate = (reason: "timeout" | "forced") => {
+        if (escalated) return;
+        escalated = true;
+        clearTimeout(timeout);
+
+        if (!service.process) return;
+
+        if (reason === "forced") {
+          this.logger.warn(`Force-stopping ${service.name} with SIGKILL.`);
+          this.addLog(
+            serviceID,
+            `Force stop requested — sending SIGKILL to ${service.name}.`,
+            "system",
+          );
+        } else {
+          this.logger.warn(
+            `Service ${service.name} did not stop gracefully with SIGTERM, sending SIGKILL.`,
+          );
+          this.addLog(
+            serviceID,
+            `${service.name} did not stop gracefully, forcing SIGKILL.`,
+            "system",
+          );
+        }
+
+        // Force-kill the whole group, plus any descendants that escaped it.
+        // The walk runs while the process is still alive (so pids are
+        // current), then we send the group SIGKILL once it's done.
+        void this.reapEscapedDescendants(leaderPid).then(() => {
+          this.stopSignal(service, "SIGKILL", true);
+        });
+      };
+
+      escalateStop = () => escalate("forced");
+
+      if (opts.force) {
+        // Straight to SIGKILL — no SIGTERM, no grace period, no timer to arm.
+        escalate("forced");
+        return;
+      }
+
       // Graceful stop: SIGTERM to just the main process so it can coordinate
       // its own children. Otherwise signal the whole process group.
       this.stopSignal(service, "SIGTERM", !service.gracefulShutdown);
 
-      const timeout = setTimeout(
-        () => {
-          if (service.process) {
-            this.logger.warn(
-              `Service ${service.name} did not stop gracefully with SIGTERM, sending SIGKILL.`,
-            );
-
-            this.addLog(
-              serviceID,
-              `${service.name} did not stop gracefully, forcing SIGKILL.`,
-              "system",
-            );
-
-            // Force-kill the whole group, plus any descendants that escaped it.
-            // The walk runs while the process is still alive (so pids are
-            // current), then we send the group SIGKILL once it's done.
-            void this.reapEscapedDescendants(leaderPid).then(() => {
-              this.stopSignal(service, "SIGKILL", true);
-            });
-          }
-          // `positiveOr` so a per-service `stopTimeout` of 0 (or negative) falls
-          // back to the global default rather than meaning "SIGKILL immediately".
-        },
+      timeout = setTimeout(
+        () => escalate("timeout"),
+        // `positiveOr` so a per-service `stopTimeout` of 0 (or negative) falls
+        // back to the global default rather than meaning "SIGKILL immediately".
         positiveOr(service.stopTimeout, this.defaultStopTimeout),
       );
     });
+
+    this.inFlightStops.set(serviceID, { promise: run, escalate: escalateStop });
+    void run.finally(() => {
+      if (this.inFlightStops.get(serviceID)?.promise === run) {
+        this.inFlightStops.delete(serviceID);
+      }
+    });
+
+    return run;
   }
 
   /**

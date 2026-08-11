@@ -43,6 +43,7 @@
   --color-error-400: #fc8181;
   --color-error-500: #e53e3e; /* #e74c3c equivalent */
   --color-error-600: #c53030;
+  --color-error-700: #9b2c2c; /* hover for the Force Stop button */
 
   --color-gray-50: #f7fafc;
   --color-gray-100: #edf2f7;
@@ -679,6 +680,30 @@ header {
 }
 .controls button.stop-button:hover {
   @apply bg-error-600;
+}
+/* The Stop button becomes "Force Stop" while a stop is in flight. Pulse it so
+   the change of meaning is noticed — it's a SIGKILL, not another polite ask. */
+.controls button.stop-button.force-stop {
+  @apply bg-error-600;
+  animation: forceStopPulse 1.4s ease-in-out infinite;
+}
+.controls button.stop-button.force-stop:hover {
+  @apply bg-error-700;
+  animation: none;
+}
+@keyframes forceStopPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .controls button.stop-button.force-stop {
+    animation: none;
+  }
 }
 .controls button.restart-button {
   @apply bg-warning-500;

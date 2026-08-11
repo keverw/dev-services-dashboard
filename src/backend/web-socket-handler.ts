@@ -113,9 +113,15 @@ export class WebSocketHandler {
         // initializing/finalizing forever.
         await this.serviceManager.startAndWait(serviceID);
         break;
-      case "stop":
-        await this.serviceManager.stopService(serviceID);
+      case "stop": {
+        // `force` skips SIGTERM and the grace period. Only an explicit `true`
+        // counts, so a stray value can't turn a normal stop into a kill.
+        const { force } = data as { force?: unknown };
+        await this.serviceManager.stopService(serviceID, {
+          force: force === true,
+        });
         break;
+      }
       case "restart":
         await this.serviceManager.restartService(serviceID);
         break;

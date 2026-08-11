@@ -741,11 +741,13 @@ function AppContent() {
                       : true
                   }
                   onStart={() => startServiceWithDepCheck(activeService)}
-                  onStop={() => {
-                    sendAction(activeService.id, "stop");
+                  onStop={(force) => {
+                    sendAction(activeService.id, "stop", { force: !!force });
                     addToast({
-                      message: `Stopping ${activeService.name}...`,
-                      type: "info",
+                      message: force
+                        ? `Force-stopping ${activeService.name}...`
+                        : `Stopping ${activeService.name}...`,
+                      type: force ? "warning" : "info",
                       duration: 3000,
                     });
                   }}

@@ -353,10 +353,12 @@ export class ApiRouter {
     serviceID: string,
   ) {
     this.assertMethod(req.method ?? "GET", ["POST"]);
-    await this.readJSONBody(req);
+    const body = await this.readJSONBody(req);
     this.assertNotShuttingDown();
 
-    await this.serviceManager.stopService(serviceID);
+    await this.serviceManager.stopService(serviceID, {
+      force: readBooleanFlag(body, "force", false),
+    });
     const service = this.summaryOf(serviceID);
 
     // A service that was already `error`/`crashed` stays in that state after a
@@ -774,14 +776,23 @@ function toSummary(service: Service): ServiceSummary {
   };
 }
 
+/** Reads an optional boolean body field, rejecting a non-boolean outright. */
+function readBooleanFlag(
+  body: Record<string, unknown> | undefined,
+  name: string,
+  fallback: boolean,
+): boolean {
+  const value = body?.[name];
+  if (value === undefined) return fallback;
+  if (typeof value !== "boolean") {
+    throw new ApiFailure("bad_request", `"${name}" must be a boolean.`);
+  }
+  return value;
+}
+
 /** Reads the `wait` flag, defaulting to true (block until the outcome is known). */
 function readWaitFlag(body: Record<string, unknown> | undefined): boolean {
-  const wait = body?.wait;
-  if (wait === undefined) return true;
-  if (typeof wait !== "boolean") {
-    throw new ApiFailure("bad_request", '"wait" must be a boolean.');
-  }
-  return wait;
+  return readBooleanFlag(body, "wait", true);
 }
 
 function readIntParam(url: URL, name: string): number | undefined {

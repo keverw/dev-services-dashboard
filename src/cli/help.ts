@@ -45,7 +45,13 @@ export const COMMANDS: CommandSpec[] = [
     aliases: [],
     args: "<service>",
     summary: "Stop a service and wait for it to terminate.",
-    flags: [],
+    flags: [
+      {
+        name: "--force",
+        summary:
+          "SIGKILL immediately instead of SIGTERM plus the stopTimeout grace period. Works on a service already wedged in `stopping`, where it cuts the wait short.",
+      },
+    ],
   },
   {
     name: "restart",

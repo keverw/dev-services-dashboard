@@ -204,6 +204,20 @@ describe("Control API", () => {
       expect((await res.json()).service.status).toBe("stopped");
     });
 
+    it("force-stops a service", async () => {
+      await postJSON("/services/api/start");
+
+      const res = await postJSON("/services/api/stop", { force: true });
+      expect(res.status).toBe(200);
+      expect((await res.json()).service.status).toBe("stopped");
+    });
+
+    it("rejects a non-boolean force", async () => {
+      const res = await postJSON("/services/api/stop", { force: "yes" });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("bad_request");
+    });
+
     it("reports start-all counts", async () => {
       const res = await postJSON("/start-all");
       expect(res.status).toBe(200);

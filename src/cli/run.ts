@@ -105,6 +105,7 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
       timeout: { type: "string" },
       check: { type: "boolean", default: false },
       "no-wait": { type: "boolean", default: false },
+      force: { type: "boolean", default: false },
       plain: { type: "boolean", default: false },
       follow: { type: "boolean", short: "f", default: false },
       lines: { type: "string", short: "n" },
@@ -358,7 +359,9 @@ async function commandLifecycle(
   if (!id) return EXIT.USAGE;
 
   const body =
-    action === "stop" ? {} : { wait: ctx.values["no-wait"] !== true };
+    action === "stop"
+      ? { force: ctx.values.force === true }
+      : { wait: ctx.values["no-wait"] !== true };
 
   const result = await ctx.client.post<ServiceResponse>(
     `/services/${encodeURIComponent(id)}/${action}`,
