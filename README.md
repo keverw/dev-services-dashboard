@@ -712,6 +712,8 @@ dsd stop api --force
 
 It also works on a service **already** stuck in `stopping`, which is the case it really exists for. Rather than starting a second stop, it cuts short the grace period of the one already in flight, and the original caller settles normally too.
 
+(A plain `dsd stop` against a service already `stopping` joins the in-flight stop and waits for it, rather than starting a second one. It just doesn't hurry it along.)
+
 The web UI mirrors this: while a stop is in flight, the **Stop** button becomes a pulsing **Force Stop** instead of greying out, sending the same request. The header's **Stop All** does the same, becoming **Force Stop All** while a run is under way, and a forced run also sweeps up services already stuck `stopping` from the run it's escalating, which a normal stop-all skips.
 
 > Note this is different from sending `SIGKILL` through the signals dropdown (or `dsd signal`). Signals must be declared in the service's `signals` config, are delivered only to the main process, and don't move the service to `stopping` or reap escaped descendants. A force stop is a stop; it just skips the polite phase.
@@ -802,7 +804,7 @@ Failures return a non-2xx status and `{"ok":false,"error":{"code","message"}}`. 
 
 Two behaviors worth knowing:
 
-- **`start` and `restart` block by default** until the service settles, so the response reflects the real outcome rather than "accepted". With hooks configured that can take up to `beforeStartTimeout + startTimeout + afterStartTimeout` (~130s with the defaults), which is why the CLI applies no client-side deadline to these commands. Pass `{"wait":false}` for fire-and-forget.
+- **`start` and `restart` block by default** until the service settles, so the response reflects the real outcome rather than "accepted". With hooks configured that can take up to `beforeStartTimeout + startTimeout + afterStartTimeout` (~130s with the defaults), which is why the CLI applies no client-side deadline to these commands. (Nor to `stop` / `stop-all`, which wait out a configurable `stopTimeout`.) Pass `{"wait":false}` for fire-and-forget.
 - **A start "succeeds" once the process spawns.** A service that exits immediately afterwards will report success and then show `error` on the next `status`, the same semantics the web UI's Start All has always had. If a fast-exiting service matters to you, follow a start with `dsd status <service> --check`.
 - **The log buffer is a ring buffer** capped at `maxLogLines`. A logs response includes `bufferSize`, `bufferLimit`, and `truncated`; when `truncated` is true, older lines have already been evicted, so a `since`-based poller may have missed some.
 

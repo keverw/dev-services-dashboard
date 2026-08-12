@@ -543,7 +543,9 @@ describe("ServiceManager: core behavior", () => {
 
     // A duplicate stop re-broadcasts `stopping`. The bug re-armed the short
     // 50ms startTimeout here; the fix ignores it and keeps the 550ms window.
-    await sm.stopService("a");
+    // Not awaited: a duplicate stop now joins the in-flight one, so it doesn't
+    // settle until the exit emitted below.
+    const duplicateStop = sm.stopService("a");
 
     // Wait well past the short window (50ms) but inside the long one, then let
     // the stop finish. Buggy: the start already timed out (false). Fixed: still
@@ -554,6 +556,7 @@ describe("ServiceManager: core behavior", () => {
     expect(await startResult).toBe(true);
     expect(sm.getService("a")?.status).toBe("running");
     await stop;
+    await duplicateStop;
   });
 
   it("reaps the old group before the mid-stop start spawns (no port race)", async () => {

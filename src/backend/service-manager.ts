@@ -1063,18 +1063,23 @@ export class ServiceManager {
     const service = this.getService(serviceID);
     if (!service) return;
 
-    // Retune an in-flight graceful stop rather than starting a second one:
-    // `force` escalates it to SIGKILL now, and a `graceMs` override re-arms its
-    // grace period (usually to cut the remaining wait short). Either way the
-    // original caller's promise is the one returned, so it still settles once.
-    if (
-      service.status === "stopping" &&
-      (opts.force || opts.graceMs !== undefined)
-    ) {
+    // Join an in-flight stop rather than starting a second one, optionally
+    // retuning it on the way in: `force` escalates it to SIGKILL now, and a
+    // `graceMs` override re-arms its grace period (usually to cut the remaining
+    // wait short). Either way the original caller's promise is the one
+    // returned, so it still settles once. A caller that asked for no tuning
+    // just waits it out, which is what "stop this service" means: returning
+    // early would report the service as still `stopping` even though the stop
+    // is proceeding perfectly normally.
+    if (service.status === "stopping") {
       const inFlight = this.inFlightStops.get(serviceID);
       if (inFlight) {
         if (opts.force) inFlight.escalate();
-        else inFlight.retime(opts.graceMs!);
+        else if (opts.graceMs !== undefined) inFlight.retime(opts.graceMs);
+        // Echo the current status, as the plain duplicate-stop path below did
+        // before this joined instead of returning, so a client that asks twice
+        // still gets a frame back.
+        else this.setStatus(serviceID, "stopping", service.errorDetails);
         return inFlight.promise;
       }
     }
@@ -1502,6 +1507,16 @@ export class ServiceManager {
 
     this.logger.warn(`Service ${service.name}: ${reason}.`);
     this.addLog(serviceID, `${service.name} ${reason}.`, "system");
+
+    if (service.status === "stopping") {
+      // A stop is already tearing this down and owns the process, so there is
+      // nothing for us to stop. Explicitly do NOT join that stop: this deadline
+      // is armed precisely for a stop that isn't completing (see the
+      // `stopping` branch of runStartAndWait), so awaiting it would park the
+      // start forever instead of failing it. The in-flight stop settles the
+      // service on its own.
+      return;
+    }
 
     if (service.process) {
       // A process is live (starting/finalizing). stopService aborts the hook

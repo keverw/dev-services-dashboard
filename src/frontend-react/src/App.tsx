@@ -318,6 +318,16 @@ function AppContent() {
       case "stop_all_begin":
         setStopAllInProgress(true);
         stopAllInProgressRef.current = true;
+        // A second run can begin while one is still going (a "Force Stop All"
+        // escalating the run it's replacing; the server doesn't refuse those
+        // the way it refuses a concurrent Start All). Retire the previous
+        // progress toast first: it's sticky (duration 0) and exempt from the
+        // eviction cap, so overwriting the ref would strand it on screen for
+        // the rest of the session.
+        if (stopAllProgressToastIdRef.current) {
+          removeToast(stopAllProgressToastIdRef.current);
+          stopAllProgressToastIdRef.current = null;
+        }
         stopAllProgressToastIdRef.current = addToast({
           message: `Stopping services… (0/${data.total ?? 0})`,
           type: "info",

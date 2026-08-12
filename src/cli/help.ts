@@ -188,7 +188,7 @@ const GLOBAL_FLAGS = [
   {
     name: "--timeout <ms>",
     summary:
-      "Client timeout. Defaults to none for start/restart/start-all/stop-all, 15000 elsewhere.",
+      "Client timeout. Defaults to none for start/stop/restart/start-all/stop-all, 15000 elsewhere.",
   },
   { name: "-h, --help", summary: "Show help." },
   { name: "-v, --version", summary: "Show version." },
