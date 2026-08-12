@@ -69,12 +69,18 @@ const SLOW_COMMANDS = new Set([
 ]);
 const DEFAULT_TIMEOUT_MS = 15_000;
 /**
+ * The longest delay a timer can actually represent. Node clamps anything larger
+ * to 1ms, so a millisecond flag above this would fire almost immediately, which
+ * is the opposite of what asking for a longer wait means.
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+/**
  * Upper bound on `--grace`, mirroring the server's. Redeclared rather than
  * imported from the backend: the CLI bundle deliberately pulls in nothing from
  * `src/backend` (see `tsup.config.ts`), so importing it would drag the server
  * in behind it.
  */
-const MAX_GRACE_MS = 2_147_483_647;
+const MAX_GRACE_MS = MAX_TIMER_MS;
 /** Buffered lines replayed before `logs --follow` switches to live output. */
 const DEFAULT_FOLLOW_LINES = 10;
 
@@ -249,7 +255,9 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
 
   const timeoutMs = resolveTimeout(values.timeout, spec.name);
   if (timeoutMs === null) {
-    return usage("--timeout must be a non-negative integer.");
+    return usage(
+      `--timeout must be a non-negative integer (ms) no greater than ${MAX_TIMER_MS}. Use 0 to wait indefinitely.`,
+    );
   }
 
   const baseURL = resolveURL(values.url, io.env);
@@ -267,6 +275,7 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
     color,
     client,
     baseURL,
+    timeoutMs,
     positionals: positionals.slice(1),
     values,
   };
@@ -311,6 +320,12 @@ interface Ctx {
   client: ApiClient;
   /** The resolved dashboard URL; `logs --follow` derives its ws:// URL from it. */
   baseURL: string;
+  /**
+   * The resolved `--timeout`, in ms (0 means no deadline). The client holds its
+   * own copy; this is here for `logs --follow`, which talks WebSocket directly
+   * and would otherwise be the one command the flag didn't reach.
+   */
+  timeoutMs: number;
   positionals: string[];
   values: Record<string, unknown>;
 }
@@ -337,7 +352,10 @@ function resolveTimeout(
 ): number | null {
   if (flag !== undefined) {
     const value = Number(flag);
-    if (!Number.isInteger(value) || value < 0) return null;
+    // Bounded by the timer maximum: a larger deadline is clamped to 1ms by the
+    // runtime, so it would report `unreachable` at once instead of waiting.
+    if (!Number.isInteger(value) || value < 0 || value > MAX_TIMER_MS)
+      return null;
     return value;
   }
 
@@ -578,6 +596,7 @@ async function commandLogs(ctx: Ctx): Promise<number> {
 
     return followLogs({
       baseURL: ctx.baseURL,
+      timeoutMs: ctx.timeoutMs,
       serviceID: id,
       initialLines: lines ?? DEFAULT_FOLLOW_LINES,
       logTypes,

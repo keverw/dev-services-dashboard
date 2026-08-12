@@ -246,6 +246,21 @@ describe("CLI", () => {
       expect(resolveTimeoutForTest("status")).toBeGreaterThan(0);
       expect(resolveTimeoutForTest("logs")).toBeGreaterThan(0);
     });
+
+    it("rejects a --timeout beyond the timer maximum", async () => {
+      // A delay above 2^31-1 is clamped to 1ms by the runtime, so accepting one
+      // would turn a request to wait longer into an immediate `unreachable`.
+      for (const value of ["2147483648", "9999999999999"]) {
+        const { code, stderr } = await cli("status", "--timeout", value);
+        expect(code).toBe(EXIT.USAGE);
+        expect(stderr).toContain("2147483647");
+      }
+
+      // The boundary itself is still a legal deadline.
+      expect((await cli("status", "--timeout", "2147483647")).code).toBe(
+        EXIT.OK,
+      );
+    });
   });
 
   describe("signals", () => {
@@ -1051,6 +1066,52 @@ describe("CLI logs --follow", () => {
 
     expect(code).toBe(EXIT.USAGE);
     expect(stderr).toContain("--cursor");
+  });
+
+  it("gives up on a handshake that never completes", async () => {
+    // A peer that accepts the TCP connection and then says nothing: the socket
+    // is open, so nothing errors and nothing closes, and without a deadline on
+    // the upgrade the follow would wait there forever. This is the one command
+    // that speaks WebSocket instead of going through the HTTP client, so it is
+    // also the only place `--timeout` has to be enforced by hand.
+    const sockets: import("net").Socket[] = [];
+    const silent = createServer((socket) => sockets.push(socket));
+    const silentPort = await new Promise<number>((resolve) => {
+      silent.listen(0, "127.0.0.1", () => {
+        const address = silent.address();
+        resolve(typeof address === "object" && address ? address.port : 0);
+      });
+    });
+
+    try {
+      let stderr = "";
+      const code = await run(
+        [
+          "--url",
+          `http://127.0.0.1:${silentPort}`,
+          "logs",
+          "api",
+          "-f",
+          "--timeout",
+          "250",
+        ],
+        {
+          stdout: () => {},
+          stderr: (t) => {
+            stderr += t;
+          },
+          env: {},
+          isTTY: false,
+          version: "9.9.9-test",
+        },
+      );
+
+      expect(code).toBe(EXIT.UNREACHABLE);
+      expect(stderr).toContain("250ms");
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise((resolve) => silent.close(resolve));
+    }
   });
 
   it("rejects an unknown --type", async () => {

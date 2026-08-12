@@ -7,6 +7,14 @@ import { entryLines, formatLogEntries, type Colorize } from "./format";
 export interface FollowOptions {
   /** Dashboard base URL, e.g. `http://localhost:4000`. */
   baseURL: string;
+  /**
+   * Deadline for the WebSocket handshake, in ms; 0 means none. It covers only
+   * the connect, not the follow that comes after it, which is unbounded by
+   * design. Without it a peer that accepts the TCP connection but never
+   * completes the upgrade would hang forever, which is the one failure `logs`
+   * shares with every other command and the only one `--timeout` couldn't reach.
+   */
+  timeoutMs: number;
   serviceID: string;
   /** How many buffered entries to print before switching to live output. */
   initialLines: number;
@@ -51,6 +59,7 @@ export interface FollowOptions {
 export function followLogs(options: FollowOptions): Promise<ExitCode> {
   const {
     baseURL,
+    timeoutMs,
     serviceID,
     initialLines,
     logTypes,
@@ -68,11 +77,15 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
   return new Promise<ExitCode>((resolve) => {
     let settled = false;
     let socket: WebSocket;
+    let handshakeTimer: ReturnType<typeof setTimeout> | undefined;
 
     const finish = (code: ExitCode) => {
       if (settled) return;
       settled = true;
       signal?.removeEventListener("abort", onAbort);
+      // Cleared on every exit path, not just a successful open: a pending timer
+      // would hold the event loop open after the follow has already resolved.
+      if (handshakeTimer) clearTimeout(handshakeTimer);
       try {
         socket.close();
       } catch {
@@ -134,6 +147,24 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
       );
       return;
     }
+
+    // Armed after the constructor, so the throwing path above can't leave a
+    // timer behind, and disarmed as soon as the upgrade completes: only the
+    // handshake is on a deadline, since a follow itself is meant to run forever.
+    if (timeoutMs > 0) {
+      handshakeTimer = setTimeout(() => {
+        fail(
+          EXIT.UNREACHABLE,
+          "unreachable",
+          `Timed out after ${timeoutMs}ms connecting to ${wsURL}`,
+        );
+      }, timeoutMs);
+    }
+
+    socket.on("open", () => {
+      if (handshakeTimer) clearTimeout(handshakeTimer);
+      handshakeTimer = undefined;
+    });
 
     const wanted = (logType: LogEntry["logType"]) =>
       logTypes.size === 0 || logTypes.has(logType);

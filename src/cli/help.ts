@@ -193,7 +193,7 @@ const GLOBAL_FLAGS = [
   {
     name: "--timeout <ms>",
     summary:
-      "Client timeout. Defaults to none for start/stop/restart/start-all/stop-all, 15000 elsewhere.",
+      "Client timeout, or 0 to wait indefinitely. Defaults to none for start/stop/restart/start-all/stop-all, 15000 elsewhere. Under `logs --follow` it bounds the connection only, not the stream.",
   },
   { name: "-h, --help", summary: "Show help." },
   { name: "-v, --version", summary: "Show version." },
