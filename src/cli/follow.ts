@@ -156,6 +156,7 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
         case "log":
           if (message.serviceID !== serviceID) return;
           emit({
+            seq: message.seq,
             timestamp: message.timestamp,
             line: message.line,
             logType: message.logType,

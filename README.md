@@ -690,7 +690,7 @@ The dashboard URL is resolved in this order:
 | `dsd health` (`ping`)             | Check a dashboard is reachable                                                |
 | `dsd help [<command>]`            | Help; `dsd help --json` emits the full machine-readable manifest              |
 
-Useful flags: `--json` (machine-readable output), `-f`/`--follow`, `--lines <n>`, `--type stdout,stderr,system`, `--since <epoch-ms>`, `--plain` (bare log lines, no timestamp prefix), `--force`, `--grace <ms>`, `--no-wait`, `--timeout <ms>`, `--no-color`.
+Useful flags: `--json` (machine-readable output), `-f`/`--follow`, `--lines <n>`, `--type stdout,stderr,system`, `--since <epoch-ms>`, `--cursor <seq>`, `--plain` (bare log lines, no timestamp prefix), `--force`, `--grace <ms>`, `--no-wait`, `--timeout <ms>`, `--no-color`.
 
 ```bash
 dsd status
@@ -753,7 +753,16 @@ A few details worth knowing:
 - Only log lines go to **stdout**. Status changes ("api is now crashed") and notices go to **stderr**, so `dsd logs api -f | grep ERROR` sees log output only.
 - Under `--json` the output is **NDJSON** (one object per line, not a JSON array), so a consumer can read it incrementally instead of waiting for a document that never ends.
 - Ctrl+C exits `0`. Ending a follow is what Ctrl+C is _for_ here, so it counts as success. (Everywhere else, Ctrl+C cuts a command short before its outcome is known and exits `130`.) If the dashboard goes away mid-follow, it exits `5` (unreachable) rather than pretending the stream ended normally.
-- `--since` is a query against the stored buffer, so it can't be combined with `--follow`.
+- `--since` and `--cursor` are queries against the stored buffer, so neither can be combined with `--follow`.
+
+**Polling instead of following.** A script or agent that can't hold a stream open should page with `--cursor` rather than `--since`: every entry carries a `seq`, and each `--json` response reports the `nextCursor` to send back.
+
+```bash
+dsd logs api --json --cursor 0 --lines 50    # first page, oldest first
+dsd logs api --json --cursor 128 --lines 50  # nextCursor from the previous response
+```
+
+`--since` compares `Date.now()` milliseconds, which several entries routinely share, so paging on the newest timestamp you saw silently drops the rest of that millisecond. With `--cursor`, `--lines` is a page size that reads **forward** from the cursor (oldest first), and `nextCursor` stops at the last entry actually delivered, so a backlog larger than the page arrives on the following polls instead of being skipped. Without `--cursor`, `--lines` still means "the last N". Check `truncated` in the response: when it's true, lines you may never have read are gone for good, whether the ring buffer evicted them, someone cleared the buffer, or your cursor predates a restart of the dashboard (the sequence starts over with the process, so a cursor from before it is served the buffer from the start rather than being stranded past the end of it).
 
 ### Exit codes
 
@@ -778,19 +787,19 @@ Under `--json`, successful output is a single JSON object on **stdout**, and err
 
 The CLI is a thin wrapper over `/api/v1`, so plain `curl` works just as well, handy for an agent that doesn't have the CLI installed.
 
-| Method   | Path                                     | Notes                                                    |
-| -------- | ---------------------------------------- | -------------------------------------------------------- |
-| `GET`    | `/api/v1`                                | Self-describing route index                              |
-| `GET`    | `/api/v1/health`                         | `{dashboardName, shuttingDown, serviceCount, uptimeMs}`  |
-| `GET`    | `/api/v1/services`                       | Every service with its status                            |
-| `GET`    | `/api/v1/services/:id`                   | One service                                              |
-| `POST`   | `/api/v1/services/:id/start`             | Body `{"wait":false}` to return immediately (`202`)      |
-| `POST`   | `/api/v1/services/:id/stop`              | Body `{"force":true}` or `{"graceMs":N}`                 |
-| `POST`   | `/api/v1/services/:id/restart`           | Body `{"wait":false}`, `{"force":true}`, `{"graceMs":N}` |
-| `POST`   | `/api/v1/services/:id/signal`            | Body `{"signal":"SIGHUP"}`                               |
-| `GET`    | `/api/v1/services/:id/logs`              | Query: `limit`, `since`, `logType`, `format=text`        |
-| `DELETE` | `/api/v1/services/:id/logs`              | Clear the buffer                                         |
-| `POST`   | `/api/v1/start-all` / `/api/v1/stop-all` | Counts for the run; stop-all takes `force` / `graceMs`   |
+| Method   | Path                                     | Notes                                                       |
+| -------- | ---------------------------------------- | ----------------------------------------------------------- |
+| `GET`    | `/api/v1`                                | Self-describing route index                                 |
+| `GET`    | `/api/v1/health`                         | `{dashboardName, shuttingDown, serviceCount, uptimeMs}`     |
+| `GET`    | `/api/v1/services`                       | Every service with its status                               |
+| `GET`    | `/api/v1/services/:id`                   | One service                                                 |
+| `POST`   | `/api/v1/services/:id/start`             | Body `{"wait":false}` to return immediately (`202`)         |
+| `POST`   | `/api/v1/services/:id/stop`              | Body `{"force":true}` or `{"graceMs":N}`                    |
+| `POST`   | `/api/v1/services/:id/restart`           | Body `{"wait":false}`, `{"force":true}`, `{"graceMs":N}`    |
+| `POST`   | `/api/v1/services/:id/signal`            | Body `{"signal":"SIGHUP"}`                                  |
+| `GET`    | `/api/v1/services/:id/logs`              | Query: `limit`, `cursor`, `since`, `logType`, `format=text` |
+| `DELETE` | `/api/v1/services/:id/logs`              | Clear the buffer                                            |
+| `POST`   | `/api/v1/start-all` / `/api/v1/stop-all` | Counts for the run; stop-all takes `force` / `graceMs`      |
 
 ```bash
 curl localhost:4000/api/v1/services
@@ -806,7 +815,9 @@ Two behaviors worth knowing:
 
 - **`start` and `restart` block by default** until the service settles, so the response reflects the real outcome rather than "accepted". With hooks configured that can take up to `beforeStartTimeout + startTimeout + afterStartTimeout` (~130s with the defaults), which is why the CLI applies no client-side deadline to these commands. (Nor to `stop` / `stop-all`, which wait out a configurable `stopTimeout`.) Pass `{"wait":false}` for fire-and-forget.
 - **A start "succeeds" once the process spawns.** A service that exits immediately afterwards will report success and then show `error` on the next `status`, the same semantics the web UI's Start All has always had. If a fast-exiting service matters to you, follow a start with `dsd status <service> --check`.
-- **The log buffer is a ring buffer** capped at `maxLogLines`. A logs response includes `bufferSize`, `bufferLimit`, and `truncated`; when `truncated` is true, older lines have already been evicted, so a `since`-based poller may have missed some.
+- **The log buffer is a ring buffer** capped at `maxLogLines`. A logs response includes `bufferSize`, `bufferLimit`, and `truncated`; when `truncated` is true, lines a poller may never have read are gone (evicted, cleared, or from before a dashboard restart).
+- **Poll with `cursor`, not `since`.** Every entry carries a `seq`, a counter that increases with every line the dashboard logs. A logs response reports `nextCursor`; send it back as `?cursor=N` and you get exactly the entries after it. `since` compares `Date.now()` milliseconds, which several entries routinely share, so a caller paging on the newest timestamp it saw would silently drop the rest of that millisecond. `since` remains available for the human "logs from this point in time" query. The `seq` is also on each live `log` frame over the WebSocket, so a follower and a poller name the same line the same way.
+  With a `cursor`, `limit` pages **forward** from it (oldest first) rather than returning the newest N, and `nextCursor` stops at the last entry actually delivered, so a backlog larger than `limit` is collected over the next polls instead of being skipped. Without a `cursor`, `limit` still means "the last N".
 
 ### Security
 
@@ -836,6 +847,12 @@ Control them with the `dsd` CLI (add `--json` for machine-readable output):
 
 Prefer `--lines` over `dsd logs -f`: follow runs until interrupted, so only use
 it with a timeout (e.g. `timeout 10 dsd logs api -f`).
+
+To watch a service over several turns without holding a stream open, page with
+`dsd logs <service> --json --cursor <seq>`: each response reports the
+`nextCursor` to pass to the next call, so you see every new line exactly once.
+Start at `--cursor 0`. Do not page on timestamps with `--since`, several entries
+can share a millisecond.
 
 In a fast edit/restart loop, `dsd restart <service> --grace 300` avoids waiting
 out the full shutdown grace period on every cycle.

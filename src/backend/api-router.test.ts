@@ -355,6 +355,109 @@ describe("Control API", () => {
       expect(body.entries).toHaveLength(0);
     });
 
+    it("pages with cursor, including entries that share a millisecond", async () => {
+      await postJSON("/services/api/start");
+
+      const all = await (await fetch(`${base}/services/api/logs`)).json();
+      const entries: { seq: number; timestamp: number }[] = all.entries;
+      expect(entries.length).toBeGreaterThan(1);
+
+      // Strictly increasing, which is what makes it a cursor. Not necessarily
+      // gap-free within one service's buffer: the counter spans the dashboard,
+      // so another service's lines take numbers in between.
+      expect(
+        entries.every((e, i) => i === 0 || e.seq > entries[i - 1].seq),
+      ).toBe(true);
+      expect(all.nextCursor).toBe(entries[entries.length - 1].seq);
+
+      const rest = await (
+        await fetch(`${base}/services/api/logs?cursor=${entries[0].seq}`)
+      ).json();
+      expect(rest.entries).toEqual(entries.slice(1));
+
+      // The point of the cursor: `since` is millisecond-resolution, so any
+      // entry sharing the first one's timestamp is lost to a `since` poller
+      // but survives a `cursor` one.
+      const bySince = await (
+        await fetch(`${base}/services/api/logs?since=${entries[0].timestamp}`)
+      ).json();
+      expect(rest.entries.length).toBeGreaterThanOrEqual(
+        bySince.entries.length,
+      );
+
+      // Polling at the reported cursor yields nothing new and doesn't rewind.
+      const caughtUp = await (
+        await fetch(`${base}/services/api/logs?cursor=${all.nextCursor}`)
+      ).json();
+      expect(caughtUp.entries).toHaveLength(0);
+      expect(caughtUp.nextCursor).toBe(all.nextCursor);
+    });
+
+    it("pages past a limit smaller than the backlog, losing nothing", async () => {
+      await postJSON("/services/api/start");
+
+      const all = await (await fetch(`${base}/services/api/logs`)).json();
+      const seqs: number[] = all.entries.map((e: { seq: number }) => e.seq);
+      expect(seqs.length).toBeGreaterThan(1);
+      expect(all.truncated).toBe(false);
+
+      // One entry per page, so every page but the last holds entries back. The
+      // cursor must stop at what it delivered rather than jumping to the newest
+      // buffered entry, which would skip the backlog with nothing to warn the
+      // caller (the buffer evicted nothing).
+      const seen: number[] = [];
+      let cursor = 0;
+      for (let i = 0; i < seqs.length + 5; i++) {
+        const page = await (
+          await fetch(`${base}/services/api/logs?cursor=${cursor}&limit=1`)
+        ).json();
+        if (page.entries.length === 0) break;
+        // Forward, oldest first: a paging caller reads the head, not the tail.
+        seen.push(...page.entries.map((e: { seq: number }) => e.seq));
+        expect(page.nextCursor).toBeGreaterThan(cursor);
+        cursor = page.nextCursor;
+      }
+
+      expect(seen).toEqual(seqs);
+    });
+
+    it("keeps issuing fresh sequence numbers after a clear", async () => {
+      await postJSON("/services/api/start");
+      const before = await (await fetch(`${base}/services/api/logs`)).json();
+
+      await fetch(`${base}/services/api/logs`, { method: "DELETE" });
+
+      const after = await (await fetch(`${base}/services/api/logs`)).json();
+      // The counter is never reset, so a poller holding the pre-clear cursor
+      // still sees the line the clear itself wrote.
+      expect(after.nextCursor).toBeGreaterThan(before.nextCursor);
+      const fresh = await (
+        await fetch(`${base}/services/api/logs?cursor=${before.nextCursor}`)
+      ).json();
+      expect(fresh.entries).toEqual(after.entries);
+      // Clearing threw lines away that the poller may never have read, which
+      // is what `truncated` is for. The system line the clear writes is no
+      // substitute: a poller filtering on stdout/stderr never sees it.
+      expect(fresh.truncated).toBe(true);
+    });
+
+    it("serves the buffer from the start for a cursor past its newest entry", async () => {
+      await postJSON("/services/api/start");
+
+      const all = await (await fetch(`${base}/services/api/logs`)).json();
+      // What a poller holds after the dashboard restarts: the sequence lives on
+      // the ServiceManager and begins again at 1, so its cursor now points past
+      // everything here. Honouring it would filter every entry out and strand
+      // the caller for good.
+      const stale = await (
+        await fetch(`${base}/services/api/logs?cursor=${all.nextCursor + 1000}`)
+      ).json();
+
+      expect(stale.entries).toEqual(all.entries);
+      expect(stale.nextCursor).toBe(all.nextCursor);
+      expect(stale.truncated).toBe(true);
+    });
+
     it("rejects a non-integer limit", async () => {
       const res = await fetch(`${base}/services/api/logs?limit=abc`);
       expect(res.status).toBe(400);

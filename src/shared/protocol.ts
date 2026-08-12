@@ -32,6 +32,15 @@ export type ServiceStatusValue =
   | "crashed";
 
 export interface LogEntry {
+  /**
+   * A gap-free counter that increases with every line the dashboard logs,
+   * across all services. This, not `timestamp`, is what a poller should page
+   * on: `timestamp` comes from `Date.now()`, so several entries routinely
+   * share one millisecond and a `since`-style filter would drop the ones that
+   * landed after the cursor within the same tick. The control API's `cursor`
+   * query and `nextCursor` response field are expressed in these numbers.
+   */
+  seq: number;
   timestamp: number;
   line: string;
   logType: "stdout" | "stderr" | "system";
@@ -67,6 +76,8 @@ export type ServerMessage =
       line: string;
       logType: LogEntry["logType"];
       timestamp: number;
+      /** The entry's `LogEntry.seq`, so a live line is identified the same way a buffered one is. */
+      seq: number;
     }
   | {
       type: "status_update";

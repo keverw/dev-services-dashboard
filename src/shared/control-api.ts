@@ -93,6 +93,17 @@ export interface ServiceResponse {
   service: ServiceSummary;
 }
 
+/**
+ * The start and restart responses: a `ServiceResponse` plus the flag saying
+ * whether the request waited for the outcome. `{wait:false}` answers 202 with
+ * `waited:false` and a summary captured before the work ran, so the status in
+ * it is the old one; a waited call answers 200 with `waited:true` and a
+ * summary taken after. Stop has no such flag, it always waits.
+ */
+export interface LifecycleResponse extends ServiceResponse {
+  waited: boolean;
+}
+
 export interface LogsResponse {
   ok: true;
   serviceID: string;
@@ -104,10 +115,28 @@ export interface LogsResponse {
   /** The configured `maxLogLines` cap. */
   bufferLimit: number;
   /**
-   * True once the ring buffer has actually evicted an older line. A
-   * `since`-based poller can miss lines when this is true. Note a buffer that
-   * has merely reached `bufferLimit` has not evicted anything yet, so this
-   * stays false until the next line pushes one out.
+   * The `cursor` to send on the next poll **of this service**. Sequence
+   * numbers are dashboard-wide, so they order every buffer consistently, but a
+   * cursor still belongs to the service it came from: sent to another service
+   * it would re-deliver, or skip, that service's own entries.
+   *
+   * It stops at the last entry in
+   * `entries` when `limit` held matching entries back, so the next poll
+   * collects the rest; otherwise it is the `seq` of the newest entry in the
+   * buffer, since anything newer than the last returned entry was excluded by
+   * this request's own `logType` filter and would be excluded again. Falls
+   * back to the `cursor` that was sent when there is nothing to point at, and
+   * to 0 when neither exists.
+   */
+  nextCursor: number;
+  /**
+   * True once lines a poller may never have read are gone for good. That is:
+   * the ring buffer has actually evicted an older line (a buffer that has
+   * merely reached `bufferLimit` has not evicted anything yet, so this stays
+   * false until the next line pushes one out), a `DELETE …/logs` has thrown a
+   * non-empty buffer away, or this request's `cursor` predates a restart of
+   * the sequence, in which case the buffer is served from the start rather
+   * than the cursor.
    */
   truncated: boolean;
 }

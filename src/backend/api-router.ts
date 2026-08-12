@@ -80,7 +80,8 @@ const ROUTE_INDEX: ApiIndexResponse["routes"] = [
   {
     method: "GET",
     path: "/api/v1/services/:id/logs",
-    summary: "Buffered log lines. Query: limit, since, logType, format=text.",
+    summary:
+      "Buffered log lines. Query: limit, cursor, since, logType, format=text.",
   },
   {
     method: "DELETE",
@@ -533,13 +534,44 @@ export class ApiRouter {
       entries = entries.filter((e) => e.timestamp > since);
     }
 
+    // The poller's filter, and the one to prefer: `since` compares wall-clock
+    // milliseconds, which several entries routinely share, so a caller passing
+    // back the newest timestamp it saw would silently drop the rest of that
+    // millisecond. `seq` is gap-free and strictly increasing, so `cursor`
+    // resumes exactly where the last response ended. `since` stays for the
+    // human "logs from this point in time" query.
+    const cursor = readIntParam(url, "cursor");
+    // A cursor past the newest buffered entry cannot have come from this
+    // dashboard's sequence: the counter lives on the ServiceManager, so it
+    // restarts at 1 with the process. That's a poller holding a cursor from
+    // before a restart, and honouring it would filter every entry out and
+    // strand the caller for good (while `nextCursor` quietly rewound under
+    // it). Serve the buffer from the start instead, and report the gap through
+    // `truncated`, which is the flag a poller already watches for lost lines.
+    const newestSeq = service.logs[service.logs.length - 1]?.seq;
+    const staleCursor =
+      cursor !== undefined && newestSeq !== undefined && cursor > newestSeq;
+    if (cursor !== undefined && !staleCursor) {
+      entries = entries.filter((e) => e.seq > cursor);
+    }
+
     const limit = readIntParam(url, "limit") ?? DEFAULT_LOG_LIMIT;
     if (limit < 0) {
       throw new ApiFailure("bad_request", '"limit" must not be negative.');
     }
-    // The tail, not the head: the newest lines are what a caller asking for
-    // "the last N" wants.
-    if (entries.length > limit) entries = entries.slice(entries.length - limit);
+    // A paging caller reads forward, so it takes the *head* of what's left:
+    // the tail would hand it the newest `limit` entries and strand everything
+    // between its cursor and them, which `nextCursor` would then advance past
+    // for good. Without a cursor the request means "the last N", so the tail
+    // is what's wanted.
+    const matched = entries.length;
+    if (matched > limit) {
+      entries =
+        cursor !== undefined
+          ? entries.slice(0, limit)
+          : entries.slice(matched - limit);
+    }
+    const heldBack = matched > entries.length;
 
     if (url.searchParams.get("format") === "text") {
       // An entry is one chunk of output, not one line: it carries its trailing
@@ -566,11 +598,23 @@ export class ApiRouter {
       returned: entries.length,
       bufferSize,
       bufferLimit,
-      // Whether the ring buffer has actually dropped an older line, so a
-      // `since` poller knows it may have missed some. Asked of the manager
-      // rather than inferred from `bufferSize >= bufferLimit`: a buffer that
-      // has just reached the cap has not evicted anything yet.
-      truncated: this.serviceManager.hasEvictedLogs(serviceID),
+      // Stops at the last entry actually delivered whenever `limit` held some
+      // back, so the next poll picks up the rest instead of the buffer quietly
+      // skipping them (nothing was evicted, so `truncated` wouldn't warn).
+      // Once everything matching has been delivered, it advances to the newest
+      // buffered entry: anything newer than the last returned one can then only
+      // have been dropped by `logType` (`since`/`cursor` drop older ones), and
+      // the next poll would drop it again, so advancing past it costs the
+      // caller nothing and saves rescanning it forever.
+      nextCursor: heldBack
+        ? (entries[entries.length - 1]?.seq ?? cursor ?? 0)
+        : (newestSeq ?? cursor ?? 0),
+      // Whether lines a poller may never have read are gone: the ring buffer
+      // evicted one (asked of the manager rather than inferred from
+      // `bufferSize >= bufferLimit`, since a buffer that has just reached the
+      // cap has not evicted anything yet), or this request's cursor predates a
+      // restart of the sequence, so whatever it was pointing at is not here.
+      truncated: this.serviceManager.hasEvictedLogs(serviceID) || staleCursor,
     });
   }
 

@@ -120,6 +120,7 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
       lines: { type: "string", short: "n" },
       type: { type: "string" },
       since: { type: "string" },
+      cursor: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
@@ -483,6 +484,15 @@ async function commandLogs(ctx: Ctx): Promise<number> {
     return EXIT.USAGE;
   }
 
+  const cursor =
+    ctx.values.cursor === undefined ? undefined : Number(ctx.values.cursor);
+  if (cursor !== undefined && (!Number.isInteger(cursor) || cursor < 0)) {
+    ctx.io.stderr(
+      "dsd: --cursor must be a non-negative integer (a nextCursor from an earlier response).\n",
+    );
+    return EXIT.USAGE;
+  }
+
   if (ctx.values.follow === true) {
     const logTypes = parseLogTypes(ctx.values.type);
     if (logTypes === null) {
@@ -492,10 +502,14 @@ async function commandLogs(ctx: Ctx): Promise<number> {
       return EXIT.USAGE;
     }
 
-    // `--since` is a buffer query; following starts from the buffered tail and
-    // then streams live, so the two don't combine meaningfully.
+    // `--since` and `--cursor` are buffer queries; following starts from the
+    // buffered tail and then streams live, so neither combines meaningfully.
     if (ctx.values.since !== undefined) {
       ctx.io.stderr("dsd: --since cannot be combined with --follow.\n");
+      return EXIT.USAGE;
+    }
+    if (cursor !== undefined) {
+      ctx.io.stderr("dsd: --cursor cannot be combined with --follow.\n");
       return EXIT.USAGE;
     }
 
@@ -521,6 +535,7 @@ async function commandLogs(ctx: Ctx): Promise<number> {
     params.set("logType", String(ctx.values.type));
   if (ctx.values.since !== undefined)
     params.set("since", String(ctx.values.since));
+  if (cursor !== undefined) params.set("cursor", String(cursor));
 
   const query = params.toString();
   const path = `/services/${encodeURIComponent(id)}/logs${query ? `?${query}` : ""}`;

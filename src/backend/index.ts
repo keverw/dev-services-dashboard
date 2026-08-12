@@ -269,6 +269,7 @@ export type {
   HealthResponse,
   ServiceListResponse,
   ServiceResponse,
+  LifecycleResponse,
   LogsResponse,
   ClearLogsResponse,
   SignalResponse,

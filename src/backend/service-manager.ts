@@ -188,6 +188,11 @@ export class ServiceManager {
   // control API reports this as `truncated`, which a `since`-based poller uses
   // to decide whether it may have missed lines.
   private evictedLogs = new Set<string>();
+  // The `seq` the next log entry will carry. Dashboard-wide rather than
+  // per-service, so one counter orders every buffer, and deliberately never
+  // reset: clearing a buffer must not hand a later entry a number an earlier
+  // one already used, or a poller holding the old cursor would skip it.
+  private nextLogSeq = 1;
   // In-flight `startAndWait` runs, keyed by serviceID. A second concurrent
   // start of the same service attaches to the existing run's promise rather
   // than spawning a second waiter+timer (only one waiter can live in
@@ -418,13 +423,24 @@ export class ServiceManager {
     // they'd just be noise (see stripAnsi for what's covered).
     const line = stripAnsi(originalLine);
 
-    const logEntry: LogEntry = { timestamp: Date.now(), line, logType };
+    const logEntry: LogEntry = {
+      seq: this.nextLogSeq++,
+      timestamp: Date.now(),
+      line,
+      logType,
+    };
     service.logs.push(logEntry);
     if (service.logs.length > this.maxLogLines) {
       service.logs.shift();
       this.evictedLogs.add(serviceID);
     }
-    this.broadcastLog(serviceID, line, logType, logEntry.timestamp);
+    this.broadcastLog(
+      serviceID,
+      line,
+      logType,
+      logEntry.timestamp,
+      logEntry.seq,
+    );
   }
 
   private broadcastLog(
@@ -432,8 +448,9 @@ export class ServiceManager {
     line: string,
     logType: LogEntry["logType"],
     timestamp: number,
+    seq: number,
   ) {
-    this.broadcastFn({ type: "log", serviceID, line, logType, timestamp });
+    this.broadcastFn({ type: "log", serviceID, line, logType, timestamp, seq });
   }
 
   /**
@@ -1440,10 +1457,16 @@ export class ServiceManager {
   clearServiceLogs(serviceID: string) {
     const service = this.getService(serviceID);
     if (service) {
+      // Clearing a non-empty buffer drops lines exactly the way an eviction
+      // does, so it counts as one: a poller holding a cursor from before the
+      // clear would otherwise be told `truncated: false` and never learn that
+      // what sat between its cursor and here is gone. (The system line the
+      // clear writes is no substitute, a poller filtering on
+      // `logType=stdout,stderr` never sees it.) An already-empty buffer had
+      // nothing to lose, so it stays as it was.
+      if (service.logs.length === 0) this.evictedLogs.delete(serviceID);
+      else this.evictedLogs.add(serviceID);
       service.logs = [];
-      // A cleared buffer has nothing older to have lost, so the next fill
-      // starts from "nothing evicted" again.
-      this.evictedLogs.delete(serviceID);
       this.logger.info(`Server-side logs cleared for service: ${service.name}`);
       this.addLog(serviceID, "Log buffer cleared by user.", "system");
       this.broadcastFn({ type: "logs_cleared", serviceID });

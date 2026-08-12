@@ -289,6 +289,34 @@ describe("CLI", () => {
       expect(stderr).toContain("--lines");
     });
 
+    it("rejects a bad --cursor", async () => {
+      const { code, stderr } = await cli("logs", "api", "--cursor", "1.5");
+      expect(code).toBe(EXIT.USAGE);
+      expect(stderr).toContain("--cursor");
+    });
+
+    it("--cursor pages forward from a previous nextCursor", async () => {
+      await cli("start", "api");
+
+      const first = JSON.parse((await cli("logs", "api", "--json")).stdout);
+      expect(first.entries.length).toBeGreaterThan(0);
+
+      const caughtUp = JSON.parse(
+        (await cli("logs", "api", "--json", "--cursor", `${first.nextCursor}`))
+          .stdout,
+      );
+      expect(caughtUp.entries).toHaveLength(0);
+      expect(caughtUp.nextCursor).toBe(first.nextCursor);
+
+      // From the very start, one entry per page: the head, not the tail, so a
+      // poller collects the backlog instead of jumping to the newest line.
+      const page = JSON.parse(
+        (await cli("logs", "api", "--json", "--cursor", "0", "--lines", "1"))
+          .stdout,
+      );
+      expect(page.entries).toEqual([first.entries[0]]);
+    });
+
     it("clears logs", async () => {
       await cli("start", "api");
       expect((await cli("clear-logs", "api")).code).toBe(EXIT.OK);
@@ -725,6 +753,27 @@ describe("CLI logs --follow", () => {
 
     expect(code).toBe(EXIT.USAGE);
     expect(stderr).toContain("--since");
+  });
+
+  it("rejects --cursor together with --follow", async () => {
+    const controller = new AbortController();
+    let stderr = "";
+    const code = await run(
+      ["--url", url, "logs", "api", "-f", "--cursor", "1"],
+      {
+        stdout: () => {},
+        stderr: (t) => {
+          stderr += t;
+        },
+        env: {},
+        isTTY: false,
+        version: "9.9.9-test",
+        signal: controller.signal,
+      },
+    );
+
+    expect(code).toBe(EXIT.USAGE);
+    expect(stderr).toContain("--cursor");
   });
 
   it("rejects an unknown --type", async () => {

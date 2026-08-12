@@ -132,6 +132,11 @@ export const COMMANDS: CommandSpec[] = [
         summary: "Only entries newer than this epoch-milliseconds timestamp.",
       },
       {
+        name: "--cursor <seq>",
+        summary:
+          "Only entries after this sequence number, for polling: pass back the nextCursor from the previous --json response. Prefer this over --since, whose millisecond timestamps can be shared by several entries. Pages forward from the cursor, so --lines is a page size here, not a tail.",
+      },
+      {
         name: "--plain",
         summary: "Print bare log lines with no timestamp prefix.",
       },
