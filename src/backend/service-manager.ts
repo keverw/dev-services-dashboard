@@ -207,6 +207,11 @@ export class ServiceManager {
       escalate: () => void;
       /** Re-arms the grace period of a stop already under way (see `graceMs`). */
       retime: (graceMs: number) => void;
+      /**
+       * When the currently-armed grace period expires (epoch ms), or 0 if none
+       * is armed. Read by `remainingStopGraceMs`.
+       */
+      graceEndsAt: () => number;
     }
   >();
   private startAllInProgress = false;
@@ -1155,6 +1160,7 @@ export class ServiceManager {
     // in-flight entry registered just below can expose them.
     let escalateStop: () => void = () => {};
     let retimeStop: (graceMs: number) => void = () => {};
+    let readGraceEndsAt: () => number = () => 0;
 
     const run = new Promise<void>((resolve) => {
       if (!service.process) {
@@ -1221,6 +1227,9 @@ export class ServiceManager {
       // Declared before `escalate` so the closure can clear it; assigned below.
       let timeout: ReturnType<typeof setTimeout> | undefined;
       let escalated = false;
+      // When the currently-armed grace period expires (epoch ms). 0 until one is
+      // armed, and on the `force` path, which arms none at all.
+      let graceEndsAt = 0;
 
       /**
        * Jump to SIGKILL. Reached either by the grace period expiring or by a
@@ -1267,22 +1276,25 @@ export class ServiceManager {
        */
       const armGrace = (graceMs: number | undefined) => {
         if (timeout) clearTimeout(timeout);
-        timeout = setTimeout(
-          () => escalate("timeout"),
-          // `positiveOr` so a per-service `stopTimeout` of 0 (or negative) falls
-          // back to the global default rather than meaning "SIGKILL immediately".
-          // A per-request `graceMs` takes precedence over both, and is guarded
-          // the same way, so a bad override can't collapse the grace period.
-          clampTimerMs(
-            positiveOr(
-              graceMs,
-              positiveOr(service.stopTimeout, this.defaultStopTimeout),
-            ),
+        // `positiveOr` so a per-service `stopTimeout` of 0 (or negative) falls
+        // back to the global default rather than meaning "SIGKILL immediately".
+        // A per-request `graceMs` takes precedence over both, and is guarded
+        // the same way, so a bad override can't collapse the grace period.
+        const delay = clampTimerMs(
+          positiveOr(
+            graceMs,
+            positiveOr(service.stopTimeout, this.defaultStopTimeout),
           ),
         );
+        // Published so a start that has to wait this stop out can size its own
+        // deadline against the grace period actually armed, not the configured
+        // one (see `remainingStopGraceMs`).
+        graceEndsAt = Date.now() + delay;
+        timeout = setTimeout(() => escalate("timeout"), delay);
       };
 
       escalateStop = () => escalate("forced");
+      readGraceEndsAt = () => (escalated ? 0 : graceEndsAt);
       retimeStop = (graceMs: number) => {
         // Nothing to re-arm once we've already jumped to SIGKILL.
         if (escalated || !service.process) return;
@@ -1311,6 +1323,7 @@ export class ServiceManager {
       promise: run,
       escalate: escalateStop,
       retime: retimeStop,
+      graceEndsAt: readGraceEndsAt,
     });
     void run.finally(() => {
       if (this.inFlightStops.get(serviceID)?.promise === run) {
@@ -1319,6 +1332,22 @@ export class ServiceManager {
     });
 
     return run;
+  }
+
+  /**
+   * How much of the in-flight stop's grace period is still to run, or 0 when
+   * there is no stop under way (or it has already escalated to SIGKILL).
+   *
+   * A stop's grace period isn't necessarily the service's configured
+   * `stopTimeout`: a per-request `graceMs` (or a `retime` of a stop already
+   * under way) can set a far longer one. Anything sizing a deadline against
+   * "how long could this stop still legitimately take" has to ask here rather
+   * than read `stopTimeout`, or it will give up while the stop is proceeding
+   * exactly as asked.
+   */
+  private remainingStopGraceMs(serviceID: string): number {
+    const endsAt = this.inFlightStops.get(serviceID)?.graceEndsAt() ?? 0;
+    return Math.max(0, endsAt - Date.now());
   }
 
   /**
@@ -1679,16 +1708,31 @@ export class ServiceManager {
 
       // Start requested while the service is still tearing down: wait for the
       // stop to finish, then start a fresh run (the waiter above kicks the start
-      // on `stopped`). The stop's own SIGKILL fires at `stopTimeout`, so we wait
-      // that long plus a further `startTimeout` of grace for the kill to be
-      // reaped before giving up: a genuinely hung stop fails the start rather
-      // than parking here forever, while a merely-slow teardown still gets a
-      // generous window to complete.
+      // on `stopped`). The stop's own SIGKILL fires when its grace period
+      // expires, so we wait that long plus a further `startTimeout` of grace for
+      // the kill to be reaped before giving up: a genuinely hung stop fails the
+      // start rather than parking here forever, while a merely-slow teardown
+      // still gets a generous window to complete.
+      //
+      // The grace period is read from the stop actually in flight, not from the
+      // configured `stopTimeout`: a per-request `graceMs` can have armed a much
+      // longer one, and sizing against the configured value would fail the
+      // start while that stop is proceeding perfectly normally.
+      // `clampTimerMs` because the two summed can exceed what setTimeout holds.
+      //
+      // This is a snapshot taken now. A `retime` that lengthens the grace after
+      // this deadline is armed is NOT picked up (the waiter below deliberately
+      // ignores the re-broadcast `stopping`), so that ordering can still time
+      // the start out early.
       if (service?.status === "stopping") {
         awaitingStop = true;
         arm(
-          positiveOr(service.stopTimeout, this.defaultStopTimeout) +
-            this.startTimeout,
+          clampTimerMs(
+            Math.max(
+              this.remainingStopGraceMs(serviceID),
+              positiveOr(service.stopTimeout, this.defaultStopTimeout),
+            ) + this.startTimeout,
+          ),
         );
         return;
       }
