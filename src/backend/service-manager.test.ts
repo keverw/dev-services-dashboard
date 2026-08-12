@@ -2010,6 +2010,93 @@ describe("graceMs override", () => {
       await stop;
     });
   });
+
+  // A start requested mid-stop waits the stop out rather than failing. These
+  // three pin how long it's willing to wait: long enough for the grace period
+  // actually armed (which a `graceMs` can stretch well past the configured
+  // `stopTimeout`), but no longer than that.
+  it("a start parked on a long-graceMs stop waits it out instead of failing", async () => {
+    await withRealTimers(async () => {
+      // Sized so the two candidate deadlines are far apart: from the configured
+      // stopTimeout it's 50 + 150 = 200ms, from the armed grace it's ~750ms.
+      // The SIGKILL lands at 600ms, so only the latter survives to see it.
+      const { sm } = makeManager([svc("a", { stopTimeout: 50 })], {
+        timeouts: { stopTimeout: 50, startTimeout: 150 },
+      });
+      await startAndRun(sm, "a");
+      spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
+
+      const stop = sm.stopService("a", { graceMs: 600 });
+      await new Promise((r) => realSetTimeout(r, 30));
+      expect(sm.getService("a")!.status).toBe("stopping");
+
+      // Without the fix this gives up at 200ms and resolves false while the
+      // stop is still proceeding exactly as asked.
+      expect(await sm.startAndWait("a")).toBe(true);
+      expect(sm.getService("a")!.status).toBe("running");
+      await stop;
+    });
+  });
+
+  it("a retime lengthening the grace extends a start already waiting on it", async () => {
+    await withRealTimers(async () => {
+      const { sm } = makeManager([svc("a", { stopTimeout: 50 })], {
+        timeouts: { stopTimeout: 50, startTimeout: 150 },
+      });
+      await startAndRun(sm, "a");
+      spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
+
+      // The start parks against a 120ms grace, so its deadline is ~270ms.
+      const stop = sm.stopService("a", { graceMs: 120 });
+      await new Promise((r) => realSetTimeout(r, 20));
+      const start = sm.startAndWait("a");
+
+      // Now stretch that grace to 600ms, i.e. past the deadline the start
+      // already armed. It has to notice and extend, or it times out at ~270ms
+      // and reports a failure while the stop runs on.
+      await new Promise((r) => realSetTimeout(r, 20));
+      void sm.stopService("a", { graceMs: 600 });
+
+      expect(await start).toBe(true);
+      expect(sm.getService("a")!.status).toBe("running");
+      await stop;
+    });
+  });
+
+  it("a plain duplicate stop does not push a waiting start's deadline out", async () => {
+    await withRealTimers(async () => {
+      // The stop-wait deadline is recomputed on every `stopping` re-broadcast,
+      // and a plain duplicate stop emits one without changing the grace period.
+      // Re-arming on those would let a client spamming stop park the start
+      // forever, so the recomputed deadline may only ever extend.
+      const { sm } = makeManager([svc("a", { stopTimeout: 50 })], {
+        timeouts: { stopTimeout: 50, startTimeout: 100 },
+      });
+      await startAndRun(sm, "a");
+      // Wedge the stop completely so the start's own deadline is what fires.
+      spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
+      spawnedProcesses[0].exitOnSignals.delete("SIGKILL");
+
+      void sm.stopService("a");
+      await new Promise((r) => realSetTimeout(r, 10));
+      const startedAt = performance.now();
+      const start = sm.startAndWait("a");
+
+      // Four duplicate stops inside the original ~150ms window. Each re-arms
+      // nothing, so the start must still give up on the original deadline
+      // rather than 150ms after the last of them.
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => realSetTimeout(r, 30));
+        void sm.stopService("a");
+      }
+
+      expect(await start).toBe(false);
+      expect(performance.now() - startedAt).toBeLessThan(250);
+
+      // Release the wedged process so the stop promise settles.
+      spawnedProcesses[0].emit("exit", null, "SIGKILL");
+    });
+  });
 });
 
 describe("force stop all", () => {

@@ -208,8 +208,8 @@ export class ServiceManager {
       /** Re-arms the grace period of a stop already under way (see `graceMs`). */
       retime: (graceMs: number) => void;
       /**
-       * When the currently-armed grace period expires (epoch ms), or 0 if none
-       * is armed. Read by `remainingStopGraceMs`.
+       * When the currently-armed grace period expires, on `performance.now()`'s
+       * monotonic clock, or 0 if none is armed. Read by `remainingStopGraceMs`.
        */
       graceEndsAt: () => number;
     }
@@ -1227,8 +1227,9 @@ export class ServiceManager {
       // Declared before `escalate` so the closure can clear it; assigned below.
       let timeout: ReturnType<typeof setTimeout> | undefined;
       let escalated = false;
-      // When the currently-armed grace period expires (epoch ms). 0 until one is
-      // armed, and on the `force` path, which arms none at all.
+      // When the currently-armed grace period expires, on `performance.now()`'s
+      // monotonic clock. 0 until one is armed, and on the `force` path, which
+      // arms none at all.
       let graceEndsAt = 0;
 
       /**
@@ -1288,8 +1289,11 @@ export class ServiceManager {
         );
         // Published so a start that has to wait this stop out can size its own
         // deadline against the grace period actually armed, not the configured
-        // one (see `remainingStopGraceMs`).
-        graceEndsAt = Date.now() + delay;
+        // one (see `remainingStopGraceMs`). `performance.now()` rather than
+        // `Date.now()` so it measures the same monotonic clock `setTimeout`
+        // does: a wall-clock jump (NTP, sleep/wake) would otherwise make the
+        // remaining grace disagree with when the timer actually fires.
+        graceEndsAt = performance.now() + delay;
         timeout = setTimeout(() => escalate("timeout"), delay);
       };
 
@@ -1304,6 +1308,13 @@ export class ServiceManager {
           "system",
         );
         armGrace(graceMs);
+        // Re-broadcast `stopping` so a `startAndWait` already parked on this
+        // stop re-reads the grace period and extends its own deadline. Without
+        // it, lengthening the grace of a stop a start is already waiting on
+        // would time that start out early (the deadline it armed was a snapshot
+        // taken before this retime). Same no-op frame the duplicate-stop path
+        // sends, so clients see nothing new.
+        this.setStatus(serviceID, "stopping", service.errorDetails);
       };
 
       if (opts.force) {
@@ -1335,8 +1346,10 @@ export class ServiceManager {
   }
 
   /**
-   * How much of the in-flight stop's grace period is still to run, or 0 when
-   * there is no stop under way (or it has already escalated to SIGKILL).
+   * When the in-flight stop of this service is due to escalate to SIGKILL, on
+   * `performance.now()`'s monotonic clock. 0 when no stop is under way, when
+   * one has already escalated, or on the `force` path, which arms no grace
+   * period at all.
    *
    * A stop's grace period isn't necessarily the service's configured
    * `stopTimeout`: a per-request `graceMs` (or a `retime` of a stop already
@@ -1344,10 +1357,13 @@ export class ServiceManager {
    * "how long could this stop still legitimately take" has to ask here rather
    * than read `stopTimeout`, or it will give up while the stop is proceeding
    * exactly as asked.
+   *
+   * An absolute point rather than a remaining duration on purpose: a waiter
+   * comparing successive readings can then tell an actual extension of the
+   * grace period from the mere passage of time.
    */
-  private remainingStopGraceMs(serviceID: string): number {
-    const endsAt = this.inFlightStops.get(serviceID)?.graceEndsAt() ?? 0;
-    return Math.max(0, endsAt - Date.now());
+  private stopGraceEndsAt(serviceID: string): number {
+    return this.inFlightStops.get(serviceID)?.graceEndsAt() ?? 0;
   }
 
   /**
@@ -1643,6 +1659,12 @@ export class ServiceManager {
         timer = setTimeout(onTimeout, ms);
       };
 
+      // While parked on an in-flight stop (`awaitingStop`), the point that
+      // stop's grace period was last seen to end. Compared against a fresh
+      // reading to tell a genuine extension of the grace period from the mere
+      // passage of time. See the `awaitingStop` branch of the waiter.
+      let stopGraceEnd = 0;
+
       // Arm the window appropriate to a given phase. A service started manually
       // just before Start All may already be mid-lifecycle, so we don't assume
       // it's at the `starting` phase.
@@ -1690,11 +1712,23 @@ export class ServiceManager {
           }
         } else if (status === "error" || status === "crashed") finish(false);
         else if (awaitingStop) {
-          // Still waiting for the in-flight stop to finish. A duplicate
-          // stopService() call re-broadcasts `stopping`; ignore it so the
-          // longer stop-wait deadline armed below stays put: re-arming the
-          // shorter `startTimeout` here could time the start out before the
-          // stop completes, so it would never start.
+          // Still waiting for the in-flight stop to finish. Never fall through
+          // to `armForStatus`, which would swap in the much shorter
+          // `startTimeout` and time the start out before the stop could
+          // possibly complete.
+          //
+          // A `retime` that lengthened this stop's grace period re-broadcasts
+          // `stopping` precisely so we pick it up here and push our own
+          // deadline out to match. Gate that on the grace period having
+          // actually moved later, not on a recomputed duration: a plain
+          // duplicate stopService() call also re-broadcasts `stopping` without
+          // changing anything, and re-arming on those would let a client that
+          // spams stop keep the start parked indefinitely.
+          const graceEnd = this.stopGraceEndsAt(serviceID);
+          if (graceEnd > stopGraceEnd) {
+            stopGraceEnd = graceEnd;
+            arm(clampTimerMs(graceEnd - performance.now() + this.startTimeout));
+          }
           return;
         } else armForStatus(status);
       });
@@ -1717,19 +1751,22 @@ export class ServiceManager {
       // The grace period is read from the stop actually in flight, not from the
       // configured `stopTimeout`: a per-request `graceMs` can have armed a much
       // longer one, and sizing against the configured value would fail the
-      // start while that stop is proceeding perfectly normally.
-      // `clampTimerMs` because the two summed can exceed what setTimeout holds.
-      //
-      // This is a snapshot taken now. A `retime` that lengthens the grace after
-      // this deadline is armed is NOT picked up (the waiter below deliberately
-      // ignores the re-broadcast `stopping`), so that ordering can still time
-      // the start out early.
+      // start while that stop is proceeding perfectly normally. A `retime`
+      // arriving after this deadline is armed is picked up too, via the
+      // `stopping` re-broadcast the waiter above extends on.
       if (service?.status === "stopping") {
         awaitingStop = true;
+        stopGraceEnd = this.stopGraceEndsAt(serviceID);
         arm(
+          // The configured `stopTimeout` stays a floor, so the ordinary case
+          // (no per-request override) arms exactly the deadline it always did,
+          // and a stop with no grace armed at all (a `force` stop) still gets a
+          // sane window rather than just `startTimeout`. `clampTimerMs` because
+          // a near-maximum grace plus `startTimeout` would otherwise overflow
+          // what setTimeout can hold and collapse to 1ms.
           clampTimerMs(
             Math.max(
-              this.remainingStopGraceMs(serviceID),
+              stopGraceEnd - performance.now(),
               positiveOr(service.stopTimeout, this.defaultStopTimeout),
             ) + this.startTimeout,
           ),
