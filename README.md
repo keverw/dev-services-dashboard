@@ -750,9 +750,9 @@ This is the one command that uses the dashboard's WebSocket rather than the HTTP
 
 A few details worth knowing:
 
-- Only log lines go to **stdout**. Status changes ("api is now crashed") and notices go to **stderr**, so `dsd logs api -f | grep ERROR` sees log output only.
+- Only log lines go to **stdout**. Status changes ("api is now crashed") and notices go to **stderr**, so `dsd logs api -f | grep ERROR` sees log output only. Under `--json`, a follow's failures (no such service, can't connect, dashboard went away) use the same error envelope as every other command; the status notices alongside them stay plain text.
 - Under `--json` the output is **NDJSON** (one object per line, not a JSON array), so a consumer can read it incrementally instead of waiting for a document that never ends.
-- Ctrl+C exits `0`. Ending a follow is what Ctrl+C is _for_ here, so it counts as success. (Everywhere else, Ctrl+C cuts a command short before its outcome is known and exits `130`.) If the dashboard goes away mid-follow, it exits `5` (unreachable) rather than pretending the stream ended normally.
+- Ctrl+C exits `0`. Ending a follow is what Ctrl+C is _for_ here, so it counts as success. (Everywhere else, Ctrl+C cuts a command short before its outcome is known and exits `130`.) A `SIGTERM` is not the same thing: that terminated the process rather than ending the follow, so it still reports the conventional `143` and a supervisor isn't told its child shut down on purpose. If the dashboard goes away mid-follow, it exits `5` (unreachable) rather than pretending the stream ended normally.
 - `--since` and `--cursor` are queries against the stored buffer, so neither can be combined with `--follow`.
 
 **Polling instead of following.** A script or agent that can't hold a stream open should page with `--cursor` rather than `--since`: every entry carries a `seq`, and each `--json` response reports the `nextCursor` to send back.
@@ -780,8 +780,11 @@ The real contract for scripts and agents (output wording may change, these won't
 | `7`   | Signal not allowed (not declared in the service's `signals`)                   |
 | `8`   | Unexpected API response                                                        |
 | `130` | Interrupted by Ctrl+C before completing (not `logs --follow`, which exits `0`) |
+| `143` | Terminated by SIGTERM before completing (including `logs --follow`)            |
 
-Under `--json`, successful output is a single JSON object on **stdout**, and errors are JSON on **stderr** (`{"ok":false,"error":{"code","message"},"exitCode":N}`), so stdout stays clean for piping.
+Under `--json`, successful output is a single JSON object on **stdout**, and **every** error is JSON on **stderr** (`{"ok":false,"error":{"code","message"},"exitCode":N}`), so stdout stays clean for piping. That includes usage errors such as an unknown flag or a missing service id, which a caller that always parses stderr would otherwise trip over. The envelope's `exitCode` is the code the command itself produced, which is what the process returns unless a signal overrides it (a `SIGTERM` arriving mid-command reports `143` whatever the command had concluded).
+
+Flags belong to the command you name: `dsd stop api --no-wait` is a usage error rather than a silently ignored flag, as is a surplus argument like `dsd start api extra`. Global flags (`--url`, `--json`, `--no-color`, `--timeout`, `--help`, `--version`) work on every command and on either side of it, and `--help` / `--version` answer instead of running the command, so `dsd status --version` prints the version rather than contacting a dashboard. Run `dsd help <command>` to see what a command takes.
 
 ### HTTP control API
 

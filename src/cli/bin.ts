@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { run } from "./run";
-import { finalExitCode } from "./exit-codes";
+import { ABORT_REASON, finalExitCode, type AbortReason } from "./exit-codes";
 import { CLI_VERSION } from "./version";
 
 /**
@@ -17,13 +17,15 @@ import { CLI_VERSION } from "./version";
 // for whichever signal forced it (130 SIGINT, 143 SIGTERM).
 const controller = new AbortController();
 let signalExitCode: number | undefined;
-const onSignal = (code: number) => () => {
+// The abort carries which signal caused it, because `logs --follow` treats the
+// two differently: Ctrl+C is how you end a follow (exit 0), a SIGTERM is not.
+const onSignal = (code: number, reason: AbortReason) => () => {
   if (signalExitCode !== undefined) process.exit(code);
   signalExitCode = code;
-  controller.abort();
+  controller.abort(reason);
 };
-const onInterrupt = onSignal(130);
-const onTerminate = onSignal(143);
+const onInterrupt = onSignal(130, ABORT_REASON.SIGINT);
+const onTerminate = onSignal(143, ABORT_REASON.SIGTERM);
 process.on("SIGINT", onInterrupt);
 process.on("SIGTERM", onTerminate);
 

@@ -203,6 +203,43 @@ export function findCommand(name: string): CommandSpec | undefined {
   return COMMANDS.find((c) => c.name === name || c.aliases.includes(name));
 }
 
+/** Long-form option names in a flag list, e.g. `-n, --lines <n>` to `lines`. */
+function optionNames(flags: { name: string }[]): Set<string> {
+  const names = new Set<string>();
+  for (const flag of flags) {
+    for (const [, name] of flag.name.matchAll(/--([a-z][\w-]*)/g)) {
+      names.add(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * The options accepted everywhere, and the extra ones a single command accepts,
+ * as `parseArgs` names them (no leading dashes).
+ *
+ * Derived from the same tables that render `--help`, so a flag can't be added
+ * to a command's documentation and still be rejected at the door, or the other
+ * way round.
+ */
+export const GLOBAL_OPTIONS = optionNames(GLOBAL_FLAGS);
+
+export function commandOptions(spec: CommandSpec): Set<string> {
+  return optionNames(spec.flags);
+}
+
+/**
+ * How many positional arguments a command takes, read off its `args` line:
+ * `<service>` is required, `[service]` is optional.
+ */
+export function commandArity(spec: CommandSpec): { min: number; max: number } {
+  const parts = spec.args.split(/\s+/).filter(Boolean);
+  return {
+    min: parts.filter((p) => p.startsWith("<")).length,
+    max: parts.length,
+  };
+}
+
 /** The JSON manifest behind `dsd help --json`. */
 export function helpManifest(version: string) {
   return {

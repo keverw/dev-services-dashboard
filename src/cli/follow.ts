@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import type { LogEntry, ServerMessage } from "@shared/protocol";
-import { EXIT, type ExitCode } from "./exit-codes";
+import { ABORT_REASON, EXIT, type ExitCode } from "./exit-codes";
+import { emitError, type ErrorSink } from "./errors";
 import { entryLines, formatLogEntries, type Colorize } from "./format";
 
 export interface FollowOptions {
@@ -17,8 +18,20 @@ export interface FollowOptions {
   plain: boolean;
   color: Colorize;
   stdout: (text: string) => void;
+  /** Notices (a cleared buffer, a status change), which are not failures. */
   stderr: (text: string) => void;
-  /** Aborting stops following and resolves with exit code 0 (e.g. Ctrl+C). */
+  /**
+   * Where the failures go. Separate from `stderr` because these honor `--json`:
+   * a follow that can't connect, loses the dashboard, or names a service that
+   * doesn't exist has to report it in the same envelope as every other command,
+   * or a caller parsing stderr breaks on exactly the errors it can't foresee.
+   */
+  sink: ErrorSink;
+  /**
+   * Aborting stops following. Ctrl+C is the documented way to end a follow, so
+   * it resolves with exit code 0; an abort whose reason is `ABORT_REASON.SIGTERM`
+   * resolves as interrupted instead, so a killed follower doesn't report success.
+   */
   signal?: AbortSignal;
 }
 
@@ -46,6 +59,7 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
     color,
     stdout,
     stderr,
+    sink,
     signal,
   } = options;
 
@@ -67,10 +81,35 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
       resolve(code);
     };
 
-    const onAbort = () => finish(EXIT.OK);
+    /**
+     * A follow that was aborted still did its job, so it exits 0 — that is what
+     * Ctrl+C means here, and it's what an embedding caller means by cancelling.
+     * A SIGTERM is the exception: the process was terminated, not asked to stop
+     * following, so it reports interrupted and `bin.ts` turns that into 143.
+     */
+    const abortExitCode = (): ExitCode =>
+      signal?.reason === ABORT_REASON.SIGTERM ? EXIT.INTERRUPTED : EXIT.OK;
+
+    const onAbort = () => finish(abortExitCode());
+
+    /**
+     * Ends the follow, reporting why in whichever format `--json` asked for.
+     *
+     * The `settled` guard is here rather than only inside `finish`, because the
+     * message is written before the exit code is decided and a late failure must
+     * not be reported at all. Closing a socket that is still connecting (Ctrl+C
+     * during the handshake) makes `ws` emit an `error` afterwards, so without
+     * this a follow that ended successfully still printed an `unreachable`
+     * error to stderr and exited 0: a caller reading either signal alone gets a
+     * different answer, which is the one thing the envelope exists to prevent.
+     */
+    const fail = (code: ExitCode, errorCode: string, message: string) => {
+      if (settled) return;
+      finish(emitError(sink, code, errorCode, message));
+    };
 
     if (signal?.aborted) {
-      resolve(EXIT.OK);
+      resolve(abortExitCode());
       return;
     }
     signal?.addEventListener("abort", onAbort);
@@ -78,16 +117,21 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
     try {
       socket = new WebSocket(wsURL);
     } catch (err) {
-      stderr(
-        `dsd: could not connect to ${wsURL} (${
-          err instanceof Error ? err.message : String(err)
-        })\n`,
-      );
-      // There's no socket to close, so this can't go through `finish`, but the
-      // abort listener still has to come off, like on every other exit path.
+      // There's no socket to close, so this can't go through `finish`/`fail`,
+      // but the abort listener still has to come off, like on every other exit
+      // path, and the message still goes out in the format that was asked for.
       settled = true;
       signal?.removeEventListener("abort", onAbort);
-      resolve(EXIT.UNREACHABLE);
+      resolve(
+        emitError(
+          sink,
+          EXIT.UNREACHABLE,
+          "unreachable",
+          `could not connect to ${wsURL} (${
+            err instanceof Error ? err.message : String(err)
+          })`,
+        ),
+      );
       return;
     }
 
@@ -112,19 +156,24 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
     };
 
     socket.on("error", (err: Error) => {
-      stderr(
-        `dsd: could not reach a dashboard at ${baseURL} (${err.message})\n`,
+      fail(
+        EXIT.UNREACHABLE,
+        "unreachable",
+        `could not reach a dashboard at ${baseURL} (${err.message})`,
       );
-      finish(EXIT.UNREACHABLE);
     });
 
     socket.on("close", () => {
       // The dashboard went away (it stopped, or the connection dropped). Report
       // it distinctly rather than exiting 0 as though following ended cleanly:
-      // a caller tailing logs wants to know the source disappeared.
-      if (settled) return;
-      stderr("dsd: connection to the dashboard closed.\n");
-      finish(EXIT.UNREACHABLE);
+      // a caller tailing logs wants to know the source disappeared. A close we
+      // asked for ourselves is already filtered by `fail`, since `finish` closed
+      // the socket only after settling.
+      fail(
+        EXIT.UNREACHABLE,
+        "unreachable",
+        "connection to the dashboard closed.",
+      );
     });
 
     socket.on("message", (data: Buffer) => {
@@ -139,8 +188,13 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
         case "initial_state": {
           const service = message.services.find((s) => s.id === serviceID);
           if (!service) {
-            stderr(`dsd: No service with id "${serviceID}".\n`);
-            finish(EXIT.NO_SERVICE);
+            // Same `service_not_found` code the HTTP routes use for this, so a
+            // caller branching on the envelope doesn't need a follow-only case.
+            fail(
+              EXIT.NO_SERVICE,
+              "service_not_found",
+              `No service with id "${serviceID}".`,
+            );
             return;
           }
 

@@ -37,13 +37,31 @@ export const EXIT = {
    * in the sequence above: it's the conventional 128 + SIGINT, which is what a
    * shell reports for an interrupted process anyway.
    *
-   * Note `logs --follow` does NOT use this. Ctrl+C is how you end a follow, so
-   * that finishing normally is a success and still exits 0.
+   * Note `logs --follow` does NOT use this for Ctrl+C. Ctrl+C is how you end a
+   * follow, so that finishing normally is a success and still exits 0. It does
+   * use it for a SIGTERM, which terminated the process rather than ending the
+   * follow, and which `finalExitCode` then reports as 143.
    */
   INTERRUPTED: 130,
 } as const;
 
 export type ExitCode = (typeof EXIT)[keyof typeof EXIT];
+
+/**
+ * The reason `bin.ts` passes to `AbortController.abort()`, naming the signal
+ * that arrived.
+ *
+ * Only `logs --follow` reads it, and only to tell the two apart: Ctrl+C is the
+ * documented way to end a follow, so it finishes successfully, while a SIGTERM
+ * from a supervisor is a termination and has to keep reporting 143. Without the
+ * reason both look like the same abort and a killed follow claims success.
+ */
+export const ABORT_REASON = {
+  SIGINT: "SIGINT",
+  SIGTERM: "SIGTERM",
+} as const;
+
+export type AbortReason = (typeof ABORT_REASON)[keyof typeof ABORT_REASON];
 
 /**
  * The process's exit code, given what `run()` returned and the code of a signal
@@ -78,4 +96,10 @@ export const EXIT_DESCRIPTIONS: [number, string][] = [
   [EXIT.SIGNAL_NOT_ALLOWED, "signal not allowed"],
   [EXIT.UNEXPECTED, "unexpected API response"],
   [EXIT.INTERRUPTED, "interrupted before completing"],
+  // Not a member of `EXIT`, since no command ever returns it: the process
+  // reports it when a SIGTERM lands, the way any Unix program does. It's
+  // documented alongside the rest because `logs --follow` makes it a real
+  // distinction (Ctrl+C is a clean finish there, a SIGTERM is not), and an
+  // agent reading this table is exactly who needs to know that.
+  [143, "terminated by SIGTERM before completing"],
 ];

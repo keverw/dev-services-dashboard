@@ -12,6 +12,7 @@ import type {
 } from "@shared/control-api";
 import { ApiClient, exitCodeForApiError, type ApiResult } from "./client";
 import { EXIT, type ExitCode } from "./exit-codes";
+import { emitError, usageError, type ErrorSink } from "./errors";
 import {
   entryLines,
   formatLogEntries,
@@ -25,7 +26,10 @@ import {
 import {
   COMMANDS,
   DEFAULT_URL,
+  GLOBAL_OPTIONS,
+  commandArity,
   commandHelp,
+  commandOptions,
   findCommand,
   helpManifest,
   rootHelp,
@@ -93,19 +97,44 @@ export async function run(argv: string[], io: CliIO): Promise<number> {
       typeof (err as { code?: string }).code === "string" &&
       (err as { code: string }).code.startsWith("ERR_PARSE_ARGS");
 
-    io.stderr(`dsd: ${message}\n`);
-    return isUsage ? EXIT.USAGE : EXIT.INTERNAL;
+    // `wantsJSON` rather than the parsed flag, because the parse is exactly what
+    // failed here. A caller that passes --json parses stderr unconditionally, so
+    // handing it a bare sentence on the one path it can't anticipate is the
+    // worst possible time to break the contract.
+    return emitError(
+      { stderr: io.stderr, json: wantsJSON(argv) },
+      isUsage ? EXIT.USAGE : EXIT.INTERNAL,
+      isUsage ? "usage" : "internal_error",
+      message,
+    );
   }
+}
+
+/**
+ * Whether `--json` was asked for, by scanning argv instead of parsing it.
+ *
+ * Only for the paths that run before (or instead of) a successful parse; every
+ * other caller uses the parsed value. Options stop at `--`, so a service named
+ * `--json` after the terminator can't switch the output format on.
+ */
+function wantsJSON(argv: string[]): boolean {
+  const terminator = argv.indexOf("--");
+  const options = terminator === -1 ? argv : argv.slice(0, terminator);
+  return options.includes("--json");
 }
 
 async function dispatch(argv: string[], io: CliIO): Promise<number> {
   // The whole argv is parsed in one pass with a single option spec, so flags
   // work on either side of the command: `dsd --url X status` and
   // `dsd status --url X` are both natural to type and both valid.
-  const { values, positionals } = parseArgs({
+  const { values, positionals, tokens } = parseArgs({
     args: argv,
     allowPositionals: true,
     strict: true,
+    // Needed to tell an explicitly typed flag from a default: `values.plain` is
+    // false either way, so only the token stream can say whether the user
+    // actually asked for a flag the command doesn't take.
+    tokens: true,
     options: {
       url: { type: "string" },
       json: { type: "boolean", default: false },
@@ -126,27 +155,6 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
     },
   });
 
-  // No command at all: `dsd`, `dsd --help`, `dsd --version`.
-  if (positionals.length === 0) {
-    if (values.version) io.stdout(`${io.version}\n`);
-    else io.stdout(`${rootHelp(io.version)}\n`);
-    return EXIT.OK;
-  }
-
-  const commandName = positionals[0];
-  const spec = findCommand(commandName);
-  if (!spec) {
-    io.stderr(
-      `dsd: unknown command "${commandName}".\nRun "dsd help" to see the available commands.\n`,
-    );
-    return EXIT.USAGE;
-  }
-
-  if (values.help) {
-    io.stdout(`${commandHelp(spec)}\n`);
-    return EXIT.OK;
-  }
-
   const json = values.json === true;
   const color: Colorize = shouldColor(
     io.isTTY,
@@ -155,16 +163,76 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
   )
     ? withColor
     : noColor;
+  const sink: ErrorSink = { stderr: io.stderr, json };
+  const usage = (message: string) => usageError(sink, message);
 
-  // Local commands that never touch the network.
-  if (spec.name === "version") {
+  /** `dsd version` and `--version` print the same thing, in the same format. */
+  const emitVersion = () => {
     io.stdout(
       json
         ? `${JSON.stringify({ ok: true, version: io.version })}\n`
         : `${io.version}\n`,
     );
     return EXIT.OK;
+  };
+
+  // No command at all: `dsd`, `dsd --help`, `dsd --version`.
+  if (positionals.length === 0) {
+    if (values.version) return emitVersion();
+    io.stdout(`${rootHelp(io.version)}\n`);
+    return EXIT.OK;
   }
+
+  const commandName = positionals[0];
+  const spec = findCommand(commandName);
+  if (!spec) {
+    return usage(
+      `unknown command "${commandName}". Run "dsd help" to see the available commands.`,
+    );
+  }
+
+  // `--help` and `--version` are global, so they win wherever they appear:
+  // `dsd status --version` prints the version rather than going and asking a
+  // dashboard for its services, exactly as `dsd --version` does. Both are
+  // answered before the checks below, since neither runs the command.
+  if (values.help) {
+    io.stdout(`${commandHelp(spec)}\n`);
+    return EXIT.OK;
+  }
+
+  if (values.version) return emitVersion();
+
+  // The parse above accepts every flag for every command, which is what lets
+  // `dsd --url X status` work, but on its own it would also let a flag the
+  // command ignores pass silently: `dsd stop api --no-wait` would block anyway,
+  // and `dsd start api extra` would start `api` as though the typo weren't
+  // there. Automation that gets this wrong should fail loudly, so check the
+  // invocation against the command that was actually named.
+  const allowed = commandOptions(spec);
+  for (const token of tokens) {
+    if (token.kind !== "option") continue;
+    if (GLOBAL_OPTIONS.has(token.name) || allowed.has(token.name)) continue;
+    return usage(
+      `"${token.rawName}" is not an option of "dsd ${commandName}". Run "dsd help ${commandName}" to see what it takes.`,
+    );
+  }
+
+  // Only the upper bound: a command that is missing a required argument is
+  // caught further down, where it can say what the argument is for rather than
+  // quote an arity at the user.
+  const extra = positionals.slice(1 + commandArity(spec).max);
+  if (extra.length > 0) {
+    return usage(
+      `unexpected argument${extra.length > 1 ? "s" : ""} ${extra
+        .map((arg) => `"${arg}"`)
+        .join(
+          ", ",
+        )} for "dsd ${commandName}". Run "dsd help ${commandName}" to see what it takes.`,
+    );
+  }
+
+  // Local commands that never touch the network.
+  if (spec.name === "version") return emitVersion();
 
   if (spec.name === "help") {
     if (json) {
@@ -174,18 +242,14 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
     // positionals[0] is "help" itself; the command being asked about follows it.
     const topic = positionals[1];
     const target = topic ? findCommand(topic) : undefined;
-    if (topic && !target) {
-      io.stderr(`dsd: unknown command "${topic}".\n`);
-      return EXIT.USAGE;
-    }
+    if (topic && !target) return usage(`unknown command "${topic}".`);
     io.stdout(`${target ? commandHelp(target) : rootHelp(io.version)}\n`);
     return EXIT.OK;
   }
 
   const timeoutMs = resolveTimeout(values.timeout, spec.name);
   if (timeoutMs === null) {
-    io.stderr("dsd: --timeout must be a non-negative integer.\n");
-    return EXIT.USAGE;
+    return usage("--timeout must be a non-negative integer.");
   }
 
   const baseURL = resolveURL(values.url, io.env);
@@ -199,6 +263,7 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
   const ctx: Ctx = {
     io,
     json,
+    sink,
     color,
     client,
     baseURL,
@@ -228,14 +293,20 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
     case "health":
       return commandHealth(ctx);
     default:
-      io.stderr(`dsd: command "${spec.name}" is not implemented.\n`);
-      return EXIT.INTERNAL;
+      return emitError(
+        sink,
+        EXIT.INTERNAL,
+        "internal_error",
+        `command "${spec.name}" is not implemented.`,
+      );
   }
 }
 
 interface Ctx {
   io: CliIO;
   json: boolean;
+  /** Where a failure goes, in the format `--json` asked for. */
+  sink: ErrorSink;
   color: Colorize;
   client: ApiClient;
   /** The resolved dashboard URL; `logs --follow` derives its ws:// URL from it. */
@@ -279,7 +350,7 @@ function resolveTimeout(
 function requireService(ctx: Ctx): string | undefined {
   const id = ctx.positionals[0];
   if (!id) {
-    ctx.io.stderr("dsd: a service id is required.\n");
+    usageError(ctx.sink, "a service id is required.");
     return undefined;
   }
   return id;
@@ -319,19 +390,7 @@ function reportFailure(ctx: Ctx, result: ApiResult<unknown>): ExitCode {
       return EXIT.OK;
   }
 
-  if (ctx.json) {
-    ctx.io.stderr(
-      `${JSON.stringify({
-        ok: false,
-        error: { code: errorCode, message },
-        exitCode: code,
-      })}\n`,
-    );
-  } else {
-    ctx.io.stderr(`dsd: ${message}\n`);
-  }
-
-  return code;
+  return emitError(ctx.sink, code, errorCode, message);
 }
 
 function emitJSON(ctx: Ctx, data: unknown) {
@@ -383,8 +442,9 @@ function stopTuning(ctx: Ctx): { force: boolean; graceMs?: number } | null {
   // becomes 1ms, i.e. an immediate kill.
   const graceMs = Number(ctx.values.grace);
   if (!Number.isInteger(graceMs) || graceMs <= 0 || graceMs > MAX_GRACE_MS) {
-    ctx.io.stderr(
-      `dsd: --grace must be a positive integer (ms) no greater than ${MAX_GRACE_MS}. Use --force for no grace period.\n`,
+    usageError(
+      ctx.sink,
+      `--grace must be a positive integer (ms) no greater than ${MAX_GRACE_MS}. Use --force for no grace period.`,
     );
     return null;
   }
@@ -480,37 +540,34 @@ async function commandLogs(ctx: Ctx): Promise<number> {
   const lines =
     ctx.values.lines === undefined ? undefined : Number(ctx.values.lines);
   if (lines !== undefined && (!Number.isInteger(lines) || lines < 0)) {
-    ctx.io.stderr("dsd: --lines must be a non-negative integer.\n");
-    return EXIT.USAGE;
+    return usageError(ctx.sink, "--lines must be a non-negative integer.");
   }
 
   const cursor =
     ctx.values.cursor === undefined ? undefined : Number(ctx.values.cursor);
   if (cursor !== undefined && (!Number.isInteger(cursor) || cursor < 0)) {
-    ctx.io.stderr(
-      "dsd: --cursor must be a non-negative integer (a nextCursor from an earlier response).\n",
+    return usageError(
+      ctx.sink,
+      "--cursor must be a non-negative integer (a nextCursor from an earlier response).",
     );
-    return EXIT.USAGE;
   }
 
   if (ctx.values.follow === true) {
     const logTypes = parseLogTypes(ctx.values.type);
     if (logTypes === null) {
-      ctx.io.stderr(
-        "dsd: --type accepts a comma-separated list of stdout, stderr, system.\n",
+      return usageError(
+        ctx.sink,
+        "--type accepts a comma-separated list of stdout, stderr, system.",
       );
-      return EXIT.USAGE;
     }
 
     // `--since` and `--cursor` are buffer queries; following starts from the
     // buffered tail and then streams live, so neither combines meaningfully.
     if (ctx.values.since !== undefined) {
-      ctx.io.stderr("dsd: --since cannot be combined with --follow.\n");
-      return EXIT.USAGE;
+      return usageError(ctx.sink, "--since cannot be combined with --follow.");
     }
     if (cursor !== undefined) {
-      ctx.io.stderr("dsd: --cursor cannot be combined with --follow.\n");
-      return EXIT.USAGE;
+      return usageError(ctx.sink, "--cursor cannot be combined with --follow.");
     }
 
     return followLogs({
@@ -523,6 +580,7 @@ async function commandLogs(ctx: Ctx): Promise<number> {
       color: ctx.color,
       stdout: ctx.io.stdout,
       stderr: ctx.io.stderr,
+      sink: ctx.sink,
       signal: ctx.io.signal,
     });
   }
@@ -583,10 +641,10 @@ async function commandSignal(ctx: Ctx): Promise<number> {
 
   const signal = ctx.positionals[1];
   if (!signal) {
-    ctx.io.stderr(
-      "dsd: a signal name is required, e.g. `dsd signal api SIGHUP`.\n",
+    return usageError(
+      ctx.sink,
+      "a signal name is required, e.g. `dsd signal api SIGHUP`.",
     );
-    return EXIT.USAGE;
   }
 
   const result = await ctx.client.post<SignalResponse>(

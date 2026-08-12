@@ -31,7 +31,12 @@ mock.module("child_process", () => ({
 import { startDevServicesDashboard } from "../backend/index";
 import type { DevUIServer } from "../backend/types";
 import { run, resolveTimeoutForTest, type CliIO } from "./run";
-import { EXIT, finalExitCode } from "./exit-codes";
+import {
+  ABORT_REASON,
+  EXIT,
+  finalExitCode,
+  type AbortReason,
+} from "./exit-codes";
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -564,6 +569,133 @@ describe("CLI", () => {
         expect(code).toBe(EXIT.OK);
       }
     });
+
+    describe("rejects flags and arguments the command doesn't take", () => {
+      it("exits 2 on a flag that belongs to another command", async () => {
+        // The case that motivated this: --no-wait is real, and a stop that
+        // silently ignored it would block for the full grace period while the
+        // caller believed it had asked not to wait.
+        const { code, stderr } = await bare("stop", "api", "--no-wait");
+        expect(code).toBe(EXIT.USAGE);
+        expect(stderr).toContain('"--no-wait" is not an option of "dsd stop"');
+
+        expect((await bare("status", "--force")).code).toBe(EXIT.USAGE);
+        expect((await bare("health", "-f")).code).toBe(EXIT.USAGE);
+      });
+
+      it("still accepts a command's own flags and the global ones", async () => {
+        await cli("start", "api");
+        expect((await cli("status", "--check", "--json")).code).toBe(EXIT.OK);
+        expect((await cli("logs", "api", "-n", "1", "--plain")).code).toBe(
+          EXIT.OK,
+        );
+        expect((await cli("stop", "api", "--force")).code).toBe(EXIT.OK);
+      });
+
+      it("exits 2 on a surplus positional", async () => {
+        const { code, stderr } = await bare("start", "api", "extra");
+        expect(code).toBe(EXIT.USAGE);
+        expect(stderr).toContain('unexpected argument "extra"');
+
+        // A command that takes none at all, and one that takes exactly two.
+        expect((await bare("start-all", "api")).code).toBe(EXIT.USAGE);
+        expect((await bare("signal", "api", "SIGHUP", "again")).code).toBe(
+          EXIT.USAGE,
+        );
+      });
+
+      it("keeps the specific message for a missing argument", async () => {
+        // Arity checking must not pre-empt these: "a service id is required"
+        // tells the user what to type, "takes 1 argument" doesn't.
+        expect((await bare("logs")).stderr).toContain(
+          "a service id is required",
+        );
+        expect((await bare("signal", "api")).stderr).toContain(
+          "a signal name is required",
+        );
+      });
+    });
+
+    describe("--json keeps errors machine-readable", () => {
+      /** Parses a JSON error envelope, asserting it agrees with the exit code. */
+      function envelope(stderr: string, code: number) {
+        const parsed = JSON.parse(stderr);
+        expect(parsed.ok).toBe(false);
+        expect(parsed.exitCode).toBe(code);
+        return parsed;
+      }
+
+      it("reports a parse failure as JSON, not as a bare sentence", async () => {
+        // The path that has no parsed --json to consult: the parse is what
+        // failed. A caller that always parses stderr must not choke here.
+        const { code, stderr } = await bare("status", "--json", "--wat");
+        expect(code).toBe(EXIT.USAGE);
+        expect(envelope(stderr, EXIT.USAGE).error.code).toBe("usage");
+      });
+
+      it("reports local validation failures as JSON", async () => {
+        for (const args of [
+          ["start", "--json"], // missing service id
+          ["stop", "api", "--json", "--grace", "0"],
+          ["logs", "api", "--json", "--lines", "-1"],
+          ["logs", "api", "--json", "--follow", "--since", "1"],
+          ["signal", "api", "--json"],
+          ["frobnicate", "--json"],
+          ["status", "--json", "--timeout", "abc"],
+        ]) {
+          const { code, stderr } = await bare(...args);
+          expect(code).toBe(EXIT.USAGE);
+          expect(envelope(stderr, EXIT.USAGE).error.code).toBe("usage");
+        }
+      });
+
+      it("leaves stdout clean when an error is reported", async () => {
+        const { stdout } = await bare("start", "--json");
+        expect(stdout).toBe("");
+      });
+
+      it("still prints plain text without --json", async () => {
+        const { stderr } = await bare("start");
+        expect(stderr).toBe("dsd: a service id is required.\n");
+      });
+    });
+
+    describe("--version is global", () => {
+      it("wins over a command that would otherwise run", async () => {
+        // `bare` has no --url, so a `status` that actually ran would go looking
+        // for a dashboard on the default port and exit 5.
+        const { code, stdout } = await bare("status", "--version");
+        expect(code).toBe(EXIT.OK);
+        expect(stdout.trim()).toBe("9.9.9-test");
+
+        // Including against a live one, where a run would have succeeded.
+        const live = await cli("status", "--version");
+        expect(live.stdout.trim()).toBe("9.9.9-test");
+        expect(live.stdout).not.toContain("SERVICE");
+      });
+
+      it("renders the same as the version command", async () => {
+        for (const args of [
+          ["--version"],
+          ["version"],
+          ["status", "--version"],
+          ["status", "-v"],
+        ]) {
+          expect((await bare(...args)).stdout.trim()).toBe("9.9.9-test");
+          expect(JSON.parse((await bare(...args, "--json")).stdout)).toEqual({
+            ok: true,
+            version: "9.9.9-test",
+          });
+        }
+      });
+
+      it("still reports an unknown command rather than the version", async () => {
+        // The invocation is checked first; a version for a command that doesn't
+        // exist would hide the typo it was asked about.
+        const { code } = await bare("frobnicate", "--version");
+        expect(code).toBe(EXIT.USAGE);
+      });
+    });
   });
 });
 
@@ -592,7 +724,11 @@ describe("CLI logs --follow", () => {
    * Runs a follow, then aborts it once `until` is satisfied (or a deadline
    * passes), so a streaming command can be asserted on without hanging.
    */
-  async function follow(args: string[], until: (stdout: string) => boolean) {
+  async function follow(
+    args: string[],
+    until: (stdout: string) => boolean,
+    abortReason?: AbortReason,
+  ) {
     const controller = new AbortController();
     let stdout = "";
     let stderr = "";
@@ -614,7 +750,7 @@ describe("CLI logs --follow", () => {
     while (!until(stdout) && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 20));
     }
-    controller.abort();
+    controller.abort(abortReason);
 
     return { code: await done, stdout, stderr };
   }
@@ -634,6 +770,63 @@ describe("CLI logs --follow", () => {
 
     expect(code).toBe(EXIT.OK);
     expect(stdout).toContain("started successfully");
+  });
+
+  it("does not report success when SIGTERM ends the follow", async () => {
+    // Ctrl+C is the documented way to end a follow, so it exits 0. A SIGTERM is
+    // a supervisor killing the process, and reporting that as a clean finish
+    // would tell the supervisor its child shut down on purpose.
+    await run(["--url", url, "start", "api"], {
+      stdout: () => {},
+      stderr: () => {},
+      env: {},
+      isTTY: false,
+      version: "9.9.9-test",
+    });
+
+    const { code } = await follow(
+      ["logs", "api", "--follow"],
+      (out) => out.includes("started successfully"),
+      ABORT_REASON.SIGTERM,
+    );
+
+    expect(code).not.toBe(EXIT.OK);
+    // `bin.ts` turns any non-zero here into the signal's own 143.
+    expect(finalExitCode(code, 143)).toBe(143);
+    expect(finalExitCode(EXIT.OK, 130)).toBe(EXIT.OK);
+  });
+
+  it("says nothing when aborted mid-handshake", async () => {
+    // Closing a socket that is still connecting makes `ws` emit an `error`
+    // after the fact. That arrives once the follow has already finished, so
+    // reporting it would put an `unreachable` failure on stderr under an exit
+    // code of 0, and a caller reading either signal alone would get a different
+    // answer. Abort with no delay at all, so the abort is in flight while the
+    // handshake is.
+    for (const args of [
+      ["logs", "api", "--follow"],
+      ["logs", "api", "--follow", "--json"],
+    ]) {
+      const controller = new AbortController();
+      let stderr = "";
+      const done = run(["--url", url, ...args], {
+        stdout: () => {},
+        stderr: (t) => {
+          stderr += t;
+        },
+        env: { NO_COLOR: "1" },
+        isTTY: false,
+        version: "9.9.9-test",
+        signal: controller.signal,
+      });
+      controller.abort();
+
+      expect(await done).toBe(EXIT.OK);
+      // Give the socket time to emit its post-close error, which would land
+      // after the promise had already resolved.
+      await new Promise((r) => setTimeout(r, 200));
+      expect(stderr).toBe("");
+    }
   });
 
   it("streams lines that arrive after it connects", async () => {
@@ -687,6 +880,75 @@ describe("CLI logs --follow", () => {
     );
     expect(code).toBe(EXIT.NO_SERVICE);
     expect(stderr).toContain("nope");
+  });
+
+  describe("--json failures stay parseable", () => {
+    it("reports an unknown service as JSON", async () => {
+      const { code, stderr } = await follow(
+        ["logs", "nope", "--follow", "--json"],
+        () => false,
+      );
+
+      expect(code).toBe(EXIT.NO_SERVICE);
+      const parsed = JSON.parse(stderr);
+      expect(parsed.ok).toBe(false);
+      // The same code the HTTP routes use, so a caller needs no follow-only case.
+      expect(parsed.error.code).toBe("service_not_found");
+      expect(parsed.exitCode).toBe(EXIT.NO_SERVICE);
+    });
+
+    it("reports an unreachable dashboard as JSON", async () => {
+      let stderr = "";
+      const code = await run(
+        ["--url", "http://127.0.0.1:1", "logs", "api", "-f", "--json"],
+        {
+          stdout: () => {},
+          stderr: (t) => {
+            stderr += t;
+          },
+          env: {},
+          isTTY: false,
+          version: "9.9.9-test",
+          signal: new AbortController().signal,
+        },
+      );
+
+      expect(code).toBe(EXIT.UNREACHABLE);
+      const parsed = JSON.parse(stderr);
+      expect(parsed.error.code).toBe("unreachable");
+      expect(parsed.exitCode).toBe(EXIT.UNREACHABLE);
+    });
+
+    it("reports the dashboard going away mid-follow as JSON", async () => {
+      let stdout = "";
+      let stderr = "";
+      const done = run(["--url", url, "logs", "api", "-f", "--json"], {
+        stdout: (t) => {
+          stdout += t;
+        },
+        stderr: (t) => {
+          stderr += t;
+        },
+        env: { NO_COLOR: "1" },
+        isTTY: false,
+        version: "9.9.9-test",
+        signal: new AbortController().signal,
+      });
+
+      await new Promise((r) => setTimeout(r, 150));
+      await server.stop();
+
+      expect(await done).toBe(EXIT.UNREACHABLE);
+      // The last line, since a status notice may precede it on the way down.
+      const lines = stderr.split("\n").filter(Boolean);
+      expect(JSON.parse(lines[lines.length - 1]).error.code).toBe(
+        "unreachable",
+      );
+      // stdout is NDJSON and must not have picked up the failure.
+      for (const line of stdout.split("\n").filter(Boolean)) {
+        expect(JSON.parse(line).ok).toBeUndefined();
+      }
+    });
   });
 
   it("exits 5 when the dashboard is not reachable", async () => {
