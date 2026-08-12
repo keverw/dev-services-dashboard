@@ -166,8 +166,8 @@ process.on("SIGINT", () => {
   process.exit(0);
 });
 
-// Custom signal — handled (not fatal) so the dashboard's "Send signal…"
+// Custom signal, handled (not fatal) so the dashboard's "Send signal…"
 // dropdown demonstrates a reload instead of a crash.
 process.on("SIGHUP", () => {
-  console.log("🔄 Received SIGHUP — reloading configuration (server stays up)");
+  console.log("🔄 Received SIGHUP: reloading configuration (server stays up)");
 });

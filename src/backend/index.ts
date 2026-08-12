@@ -23,7 +23,7 @@ const STOP_CLOSE_DEADLINE_MS = 500;
 // errors are swallowed (resolve, not reject): the common one is
 // `ERR_SERVER_NOT_RUNNING` when the server is already closed (e.g. closing the
 // `ws` server first tears down the shared HTTP server on some runtimes), which
-// is a benign no-op — stop() is best-effort and shouldn't reject on it.
+// is a benign no-op: stop() is best-effort and shouldn't reject on it.
 function closeServerWithDeadline(
   close: (cb: (err?: Error) => void) => void,
   deadlineMs: number,
@@ -117,12 +117,12 @@ export function startDevServicesDashboard(
       httpServer.on("error", (error) => {
         if (settled) {
           // The server already came up; this is a later runtime error on an
-          // already-running server — just log it.
+          // already-running server, so just log it.
           logger.error("Dev Services Dashboard server error:", error as object);
           return;
         }
 
-        // The instance never came up — reject the start promise.
+        // The instance never came up, so reject the start promise.
         settled = true;
         logger.error(
           "Fatal error starting Dev Services Dashboard server:",
@@ -171,7 +171,7 @@ export function startDevServicesDashboard(
               for (const client of wsServer.clients) client.terminate();
 
               // Await each close so a resolved stop() means the servers have
-              // actually drained — but bound the wait (see STOP_CLOSE_DEADLINE_MS)
+              // actually drained, but bound the wait (see STOP_CLOSE_DEADLINE_MS)
               // so a runtime that doesn't fire the close callback after a
               // WebSocket upgrade (e.g. Bun) can't hang shutdown.
               await closeServerWithDeadline(
@@ -257,4 +257,23 @@ export type {
   StartAllResult,
   StopAllResult,
 } from "@shared/protocol";
+// The HTTP control API (`/api/v1/*`) that the bundled CLI, and any external
+// tool or agent driving the dashboard with plain `curl`, speaks. Exported so a
+// consumer can type its own client against the same shapes the server produces.
+export type {
+  ServiceSummary,
+  ApiErrorCode,
+  ApiError,
+  ApiErrorResponse,
+  ApiIndexResponse,
+  HealthResponse,
+  ServiceListResponse,
+  ServiceResponse,
+  LifecycleResponse,
+  LogsResponse,
+  ClearLogsResponse,
+  SignalResponse,
+  StartAllResponse,
+  StopAllResponse,
+} from "@shared/control-api";
 export { createConsoleLogger } from "./logger";

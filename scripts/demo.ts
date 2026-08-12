@@ -25,7 +25,7 @@ const services: UserServiceConfig[] = [
     command: ["bun", "run", "scripts/demo-servers/db-server.ts"],
     // Post-start hook: the process has already spawned, but the dashboard holds
     // the service in a "finalizing" status (instead of "running") until this
-    // hook resolves — so it acts as a readiness gate. "Start All" waits for it
+    // hook resolves, so it acts as a readiness gate. "Start All" waits for it
     // before starting anything that depends on the DB. Here it simulates waiting
     // for connections and running migrations; throwing would tear the process
     // back down and mark the service "error" instead of letting it go "running".
@@ -251,6 +251,21 @@ const services: UserServiceConfig[] = [
     env: { NODE_ENV: "development", SERVICE_NAME: "microservice5" },
     webLinks: [{ label: "ML Dashboard", url: "http://localhost:3012/ml" }],
   },
+  {
+    id: "stubborn",
+    name: "Stubborn Service (ignores SIGTERM)",
+    command: ["bun", "run", "scripts/demo-servers/stubborn-server.ts"],
+    // Every other demo service exits on SIGTERM, so `stopping` flashes past and
+    // there's nothing to escalate. This one sits there for the whole grace
+    // period, which is what makes Force Stop / Force Stop All demoable: press
+    // Stop, and the button becomes a pulsing "Force Stop" while it wedges.
+    //
+    // 15s is a compromise. Long enough to see the state and click, short enough
+    // that Ctrl+C on the demo itself isn't a long wait if you leave this one
+    // running (shutdown stops every service and waits out this timeout before
+    // escalating to SIGKILL on its own).
+    stopTimeout: 15000,
+  },
 ];
 
 // Explicitly use the console logger (Dev Services Dashboard doesn't log by default unless you provide a logger)
@@ -293,7 +308,7 @@ console.log("📍 Open your browser to: http://localhost:4000");
 console.log("");
 console.log("🔧 Demo Features:");
 console.log(
-  "  • Eighteen simulated services representing a full microservices stack",
+  "  • Nineteen simulated services representing a full microservices stack",
 );
 console.log("  • Database servers (PostgreSQL, MongoDB, Redis, Elasticsearch)");
 console.log("  • API services (Main API, Auth, Notifications, WebSocket)");
@@ -311,6 +326,9 @@ console.log(
 console.log("  • beforeStart pre-start hook on the API server (warm-up step)");
 console.log(
   "  • afterStart post-start hook on the database (readiness/migration step)",
+);
+console.log(
+  "  • A stubborn service that ignores SIGTERM, for trying Force Stop / Force Stop All",
 );
 console.log("  • Real-time log streaming with auto-scroll");
 console.log("  • Service status indicators and connection monitoring");

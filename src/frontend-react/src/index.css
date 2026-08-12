@@ -43,6 +43,7 @@
   --color-error-400: #fc8181;
   --color-error-500: #e53e3e; /* #e74c3c equivalent */
   --color-error-600: #c53030;
+  --color-error-700: #9b2c2c; /* hover for the Force Stop button */
 
   --color-gray-50: #f7fafc;
   --color-gray-100: #edf2f7;
@@ -175,6 +176,23 @@ header {
   @apply bg-error-600;
 }
 
+/* Escalated variant, matching a service's own Force Stop button: while a Stop
+   All is running the button offers to force the whole run instead of greying
+   out for its duration. */
+.stop-all-header-btn.force-stop {
+  @apply bg-error-600;
+  animation: forceStopPulse 1.4s ease-in-out infinite;
+}
+.stop-all-header-btn.force-stop:hover {
+  @apply bg-error-700;
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stop-all-header-btn.force-stop {
+    animation: none;
+  }
+}
+
 .stop-all-header-btn:disabled {
   @apply cursor-not-allowed bg-gray-400;
 }
@@ -217,7 +235,7 @@ header {
   animation: toastSlideOut 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   /* Hold the final (hidden) frame until React unmounts the toast. Without this
      the toast snaps back to its resting visible state for the frame or two
-     between the animation ending and unmount — the dismiss "flicker". */
+     between the animation ending and unmount, the dismiss "flicker". */
   animation-fill-mode: forwards;
 }
 
@@ -680,6 +698,30 @@ header {
 .controls button.stop-button:hover {
   @apply bg-error-600;
 }
+/* The Stop button becomes "Force Stop" while a stop is in flight. Pulse it so
+   the change of meaning is noticed: it's a SIGKILL, not another polite ask. */
+.controls button.stop-button.force-stop {
+  @apply bg-error-600;
+  animation: forceStopPulse 1.4s ease-in-out infinite;
+}
+.controls button.stop-button.force-stop:hover {
+  @apply bg-error-700;
+  animation: none;
+}
+@keyframes forceStopPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .controls button.stop-button.force-stop {
+    animation: none;
+  }
+}
 .controls button.restart-button {
   @apply bg-warning-500;
 }
@@ -695,7 +737,7 @@ header {
 
 /* Gentle fade-in for the UI that appears once services finish loading
    (header controls, tabs, and the main content) so it doesn't pop in.
-   Pure opacity — no movement — so it eases in rather than dropping in. */
+   Pure opacity, no movement, so it eases in rather than dropping in. */
 @keyframes uiFadeIn {
   from {
     opacity: 0;
@@ -713,7 +755,7 @@ header {
   animation: uiFadeIn 0.5s ease both;
 }
 
-/* Slight delay so the content settles in just after the chrome — a subtle
+/* Slight delay so the content settles in just after the chrome, a subtle
    cascade rather than everything at the same instant. */
 .tab-content-container.loaded {
   animation: uiFadeIn 0.5s ease 0.1s both;
@@ -744,7 +786,7 @@ header {
 .overview-card-status {
   @apply text-xs text-gray-500 dark:text-gray-400 flex-shrink-0;
 }
-/* Colored buttons must still look disabled when disabled — their color rules
+/* Colored buttons must still look disabled when disabled: their color rules
    above otherwise win over the generic :disabled style (equal specificity,
    defined later). */
 .controls button.stop-button:disabled,

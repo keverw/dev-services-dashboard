@@ -143,13 +143,13 @@ process.on("SIGINT", () => {
   process.exit(0);
 });
 
-// Custom signals — handled instead of terminating the process, so the
+// Custom signals, handled instead of terminating the process, so the
 // dashboard's "Send signal…" dropdown demonstrates a real reload rather than a
 // crash. The server keeps running after each.
 process.on("SIGHUP", () => {
-  console.log("🔄 Received SIGHUP — reloading configuration (server stays up)");
+  console.log("🔄 Received SIGHUP: reloading configuration (server stays up)");
 });
 
 process.on("SIGUSR2", () => {
-  console.log("📂 Received SIGUSR2 — reopening log files (server stays up)");
+  console.log("📂 Received SIGUSR2: reopening log files (server stays up)");
 });

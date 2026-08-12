@@ -1,0 +1,711 @@
+import { parseArgs } from "node:util";
+import type { LogEntry } from "@shared/protocol";
+import type {
+  ClearLogsResponse,
+  HealthResponse,
+  LogsResponse,
+  ServiceListResponse,
+  ServiceResponse,
+  SignalResponse,
+  StartAllResponse,
+  StopAllResponse,
+} from "@shared/control-api";
+import { ApiClient, exitCodeForApiError, type ApiResult } from "./client";
+import { EXIT, type ExitCode } from "./exit-codes";
+import { emitError, usageError, type ErrorSink } from "./errors";
+import {
+  entryLines,
+  formatLogEntries,
+  formatServiceDetail,
+  formatServiceTable,
+  noColor,
+  shouldColor,
+  withColor,
+  type Colorize,
+} from "./format";
+import {
+  COMMANDS,
+  DEFAULT_URL,
+  GLOBAL_OPTIONS,
+  commandArity,
+  commandHelp,
+  commandOptions,
+  findCommand,
+  helpManifest,
+  rootHelp,
+} from "./help";
+import { followLogs } from "./follow";
+
+export interface CliIO {
+  stdout: (text: string) => void;
+  stderr: (text: string) => void;
+  env: Record<string, string | undefined>;
+  isTTY: boolean;
+  version: string;
+  /**
+   * Stops a long-running command: `logs --follow`, and any in-flight HTTP
+   * request (the lifecycle commands can block for minutes). `bin.ts` wires this
+   * to SIGINT; tests use it to end a follow deterministically.
+   */
+  signal?: AbortSignal;
+}
+
+/**
+ * Commands whose server side can legitimately block for a long time, so they
+ * get no client-side deadline at all.
+ *
+ * `stop` belongs here as much as the start-like ones: a stop sends SIGTERM and
+ * then waits out the service's `stopTimeout` before escalating to SIGKILL, and
+ * that timeout is configurable per service, so any value above the default
+ * client deadline would abort the request and report a failure while the
+ * server's stop was still legitimately in progress.
+ */
+const SLOW_COMMANDS = new Set([
+  "start",
+  "stop",
+  "restart",
+  "start-all",
+  "stop-all",
+]);
+const DEFAULT_TIMEOUT_MS = 15_000;
+/**
+ * The longest delay a timer can actually represent. Node clamps anything larger
+ * to 1ms, so a millisecond flag above this would fire almost immediately, which
+ * is the opposite of what asking for a longer wait means.
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+/**
+ * Upper bound on `--grace`, mirroring the server's. Redeclared rather than
+ * imported from the backend: the CLI bundle deliberately pulls in nothing from
+ * `src/backend` (see `tsup.config.ts`), so importing it would drag the server
+ * in behind it.
+ */
+const MAX_GRACE_MS = MAX_TIMER_MS;
+/** Buffered lines replayed before `logs --follow` switches to live output. */
+const DEFAULT_FOLLOW_LINES = 10;
+
+/**
+ * The whole CLI, as a function.
+ *
+ * `bin.ts` is only a shebang plus `process.exit(await run(...))`. Keeping the
+ * logic here, with output and environment injected, means the tests can drive
+ * real commands against a real dashboard and assert on exit codes and captured
+ * stdout, without spawning a child process.
+ */
+export async function run(argv: string[], io: CliIO): Promise<number> {
+  try {
+    return await dispatch(argv, io);
+  } catch (err) {
+    // A parseArgs rejection (unknown flag, missing value) is a usage error;
+    // anything else is a genuine internal fault.
+    const message = err instanceof Error ? err.message : String(err);
+    const isUsage =
+      typeof (err as { code?: string }).code === "string" &&
+      (err as { code: string }).code.startsWith("ERR_PARSE_ARGS");
+
+    // `wantsJSON` rather than the parsed flag, because the parse is exactly what
+    // failed here. A caller that passes --json parses stderr unconditionally, so
+    // handing it a bare sentence on the one path it can't anticipate is the
+    // worst possible time to break the contract.
+    return emitError(
+      { stderr: io.stderr, json: wantsJSON(argv) },
+      isUsage ? EXIT.USAGE : EXIT.INTERNAL,
+      isUsage ? "usage" : "internal_error",
+      message,
+    );
+  }
+}
+
+/**
+ * Whether `--json` was asked for, by scanning argv instead of parsing it.
+ *
+ * Only for the paths that run before (or instead of) a successful parse; every
+ * other caller uses the parsed value. Options stop at `--`, so a service named
+ * `--json` after the terminator can't switch the output format on.
+ */
+function wantsJSON(argv: string[]): boolean {
+  const terminator = argv.indexOf("--");
+  const options = terminator === -1 ? argv : argv.slice(0, terminator);
+  return options.includes("--json");
+}
+
+async function dispatch(argv: string[], io: CliIO): Promise<number> {
+  // The whole argv is parsed in one pass with a single option spec, so flags
+  // work on either side of the command: `dsd --url X status` and
+  // `dsd status --url X` are both natural to type and both valid.
+  const { values, positionals, tokens } = parseArgs({
+    args: argv,
+    allowPositionals: true,
+    strict: true,
+    // Needed to tell an explicitly typed flag from a default: `values.plain` is
+    // false either way, so only the token stream can say whether the user
+    // actually asked for a flag the command doesn't take.
+    tokens: true,
+    options: {
+      url: { type: "string" },
+      json: { type: "boolean", default: false },
+      "no-color": { type: "boolean", default: false },
+      timeout: { type: "string" },
+      check: { type: "boolean", default: false },
+      "no-wait": { type: "boolean", default: false },
+      force: { type: "boolean", default: false },
+      grace: { type: "string" },
+      plain: { type: "boolean", default: false },
+      follow: { type: "boolean", short: "f", default: false },
+      lines: { type: "string", short: "n" },
+      type: { type: "string" },
+      since: { type: "string" },
+      cursor: { type: "string" },
+      help: { type: "boolean", short: "h", default: false },
+      version: { type: "boolean", short: "v", default: false },
+    },
+  });
+
+  const json = values.json === true;
+  const color: Colorize = shouldColor(
+    io.isTTY,
+    io.env,
+    values["no-color"] === true,
+  )
+    ? withColor
+    : noColor;
+  const sink: ErrorSink = { stderr: io.stderr, json };
+  const usage = (message: string) => usageError(sink, message);
+
+  /** `dsd version` and `--version` print the same thing, in the same format. */
+  const emitVersion = () => {
+    io.stdout(
+      json
+        ? `${JSON.stringify({ ok: true, version: io.version })}\n`
+        : `${io.version}\n`,
+    );
+    return EXIT.OK;
+  };
+
+  // No command at all: `dsd`, `dsd --help`, `dsd --version`.
+  if (positionals.length === 0) {
+    if (values.version) return emitVersion();
+    io.stdout(`${rootHelp(io.version)}\n`);
+    return EXIT.OK;
+  }
+
+  const commandName = positionals[0];
+  const spec = findCommand(commandName);
+  if (!spec) {
+    return usage(
+      `unknown command "${commandName}". Run "dsd help" to see the available commands.`,
+    );
+  }
+
+  // `--help` and `--version` are global, so they win wherever they appear:
+  // `dsd status --version` prints the version rather than going and asking a
+  // dashboard for its services, exactly as `dsd --version` does. Both are
+  // answered before the checks below, since neither runs the command.
+  if (values.help) {
+    io.stdout(`${commandHelp(spec)}\n`);
+    return EXIT.OK;
+  }
+
+  if (values.version) return emitVersion();
+
+  // The parse above accepts every flag for every command, which is what lets
+  // `dsd --url X status` work, but on its own it would also let a flag the
+  // command ignores pass silently: `dsd stop api --no-wait` would block anyway,
+  // and `dsd start api extra` would start `api` as though the typo weren't
+  // there. Automation that gets this wrong should fail loudly, so check the
+  // invocation against the command that was actually named.
+  const allowed = commandOptions(spec);
+  for (const token of tokens) {
+    if (token.kind !== "option") continue;
+    if (GLOBAL_OPTIONS.has(token.name) || allowed.has(token.name)) continue;
+    return usage(
+      `"${token.rawName}" is not an option of "dsd ${commandName}". Run "dsd help ${commandName}" to see what it takes.`,
+    );
+  }
+
+  // Only the upper bound: a command that is missing a required argument is
+  // caught further down, where it can say what the argument is for rather than
+  // quote an arity at the user.
+  const extra = positionals.slice(1 + commandArity(spec).max);
+  if (extra.length > 0) {
+    return usage(
+      `unexpected argument${extra.length > 1 ? "s" : ""} ${extra
+        .map((arg) => `"${arg}"`)
+        .join(
+          ", ",
+        )} for "dsd ${commandName}". Run "dsd help ${commandName}" to see what it takes.`,
+    );
+  }
+
+  // Local commands that never touch the network.
+  if (spec.name === "version") return emitVersion();
+
+  if (spec.name === "help") {
+    if (json) {
+      io.stdout(`${JSON.stringify(helpManifest(io.version), null, 2)}\n`);
+      return EXIT.OK;
+    }
+    // positionals[0] is "help" itself; the command being asked about follows it.
+    const topic = positionals[1];
+    const target = topic ? findCommand(topic) : undefined;
+    if (topic && !target) return usage(`unknown command "${topic}".`);
+    io.stdout(`${target ? commandHelp(target) : rootHelp(io.version)}\n`);
+    return EXIT.OK;
+  }
+
+  const timeoutMs = resolveTimeout(values.timeout, spec.name);
+  if (timeoutMs === null) {
+    return usage(
+      `--timeout must be a non-negative integer (ms) no greater than ${MAX_TIMER_MS}. Use 0 to wait indefinitely.`,
+    );
+  }
+
+  const baseURL = resolveURL(values.url, io.env);
+  // The interrupt signal goes to the client too, not just `logs --follow`: the
+  // lifecycle commands run with no deadline, so without it Ctrl+C would leave
+  // the request running and the user pressing it a second time.
+  const client = new ApiClient({ baseURL, timeoutMs, signal: io.signal });
+
+  // Drop the command itself, so a handler's `positionals[0]` is its first real
+  // argument (a service id for most commands).
+  const ctx: Ctx = {
+    io,
+    json,
+    sink,
+    color,
+    client,
+    baseURL,
+    timeoutMs,
+    positionals: positionals.slice(1),
+    values,
+  };
+
+  switch (spec.name) {
+    case "status":
+      return commandStatus(ctx);
+    case "start":
+      return commandLifecycle(ctx, "start");
+    case "stop":
+      return commandLifecycle(ctx, "stop");
+    case "restart":
+      return commandLifecycle(ctx, "restart");
+    case "start-all":
+      return commandStartAll(ctx);
+    case "stop-all":
+      return commandStopAll(ctx);
+    case "logs":
+      return commandLogs(ctx);
+    case "clear-logs":
+      return commandClearLogs(ctx);
+    case "signal":
+      return commandSignal(ctx);
+    case "health":
+      return commandHealth(ctx);
+    default:
+      return emitError(
+        sink,
+        EXIT.INTERNAL,
+        "internal_error",
+        `command "${spec.name}" is not implemented.`,
+      );
+  }
+}
+
+interface Ctx {
+  io: CliIO;
+  json: boolean;
+  /** Where a failure goes, in the format `--json` asked for. */
+  sink: ErrorSink;
+  color: Colorize;
+  client: ApiClient;
+  /** The resolved dashboard URL; `logs --follow` derives its ws:// URL from it. */
+  baseURL: string;
+  /**
+   * The resolved `--timeout`, in ms (0 means no deadline). The client holds its
+   * own copy; this is here for `logs --follow`, which talks WebSocket directly
+   * and would otherwise be the one command the flag didn't reach.
+   */
+  timeoutMs: number;
+  positionals: string[];
+  values: Record<string, unknown>;
+}
+
+/**
+ * Resolves the dashboard URL. An explicit flag wins, then either env var, then
+ * the default the library itself uses.
+ */
+function resolveURL(
+  flag: string | undefined,
+  env: Record<string, string | undefined>,
+): string {
+  const raw =
+    flag ?? env.DEV_SERVICES_DASHBOARD_URL ?? env.DSD_URL ?? DEFAULT_URL;
+  // Tolerate a bare host:port and a trailing slash, both natural to type.
+  const withScheme = /^https?:\/\//.test(raw) ? raw : `http://${raw}`;
+  return withScheme.replace(/\/+$/, "");
+}
+
+/** Returns the timeout in ms, or null if the flag was malformed. */
+function resolveTimeout(
+  flag: string | undefined,
+  commandName: string,
+): number | null {
+  if (flag !== undefined) {
+    const value = Number(flag);
+    // Bounded by the timer maximum: a larger deadline is clamped to 1ms by the
+    // runtime, so it would report `unreachable` at once instead of waiting.
+    if (!Number.isInteger(value) || value < 0 || value > MAX_TIMER_MS)
+      return null;
+    return value;
+  }
+
+  // No client-side deadline for the slow commands: a start can legitimately run
+  // for beforeStartTimeout + startTimeout + afterStartTimeout (~130s by
+  // default), and timing out early would report a failure that didn't happen.
+  return SLOW_COMMANDS.has(commandName) ? 0 : DEFAULT_TIMEOUT_MS;
+}
+
+function requireService(ctx: Ctx): string | undefined {
+  const id = ctx.positionals[0];
+  if (!id) {
+    usageError(ctx.sink, "a service id is required.");
+    return undefined;
+  }
+  return id;
+}
+
+/**
+ * Renders a failed `ApiResult` and returns its exit code. Under `--json` the
+ * error goes to stderr as a parseable object so stdout stays clean for piping.
+ */
+function reportFailure(ctx: Ctx, result: ApiResult<unknown>): ExitCode {
+  let code: ExitCode;
+  let message: string;
+  let errorCode: string;
+
+  switch (result.kind) {
+    case "api":
+      code = exitCodeForApiError(result.error.code);
+      message = result.error.message;
+      errorCode = result.error.code;
+      break;
+    case "unreachable":
+      code = EXIT.UNREACHABLE;
+      message = result.message;
+      errorCode = "unreachable";
+      break;
+    case "unexpected":
+      code = EXIT.UNEXPECTED;
+      message = result.message;
+      errorCode = "unexpected_response";
+      break;
+    case "interrupted":
+      code = EXIT.INTERRUPTED;
+      message = result.message;
+      errorCode = "interrupted";
+      break;
+    case "ok":
+      return EXIT.OK;
+  }
+
+  return emitError(ctx.sink, code, errorCode, message);
+}
+
+function emitJSON(ctx: Ctx, data: unknown) {
+  ctx.io.stdout(`${JSON.stringify(data, null, 2)}\n`);
+}
+
+async function commandStatus(ctx: Ctx): Promise<number> {
+  const id = ctx.positionals[0];
+  const check = ctx.values.check === true;
+
+  if (id) {
+    const result = await ctx.client.get<ServiceResponse>(
+      `/services/${encodeURIComponent(id)}`,
+    );
+    if (result.kind !== "ok") return reportFailure(ctx, result);
+
+    if (ctx.json) emitJSON(ctx, result.data);
+    else
+      ctx.io.stdout(`${formatServiceDetail(result.data.service, ctx.color)}\n`);
+
+    return check && result.data.service.status !== "running"
+      ? EXIT.FAILED
+      : EXIT.OK;
+  }
+
+  const result = await ctx.client.get<ServiceListResponse>("/services");
+  if (result.kind !== "ok") return reportFailure(ctx, result);
+
+  if (ctx.json) emitJSON(ctx, result.data);
+  else
+    ctx.io.stdout(`${formatServiceTable(result.data.services, ctx.color)}\n`);
+
+  return check && result.data.services.some((s) => s.status !== "running")
+    ? EXIT.FAILED
+    : EXIT.OK;
+}
+
+/**
+ * Reads `--force` / `--grace <ms>` into the request body fields the stop,
+ * restart, and stop-all endpoints share. Returns null on a malformed `--grace`.
+ */
+function stopTuning(ctx: Ctx): { force: boolean; graceMs?: number } | null {
+  const force = ctx.values.force === true;
+  if (ctx.values.grace === undefined) return { force };
+
+  // Same bounds the server enforces, checked here so an obvious mistake fails
+  // without a round trip and with a message that states the real constraint.
+  // The ceiling is what setTimeout can represent; above it a delay silently
+  // becomes 1ms, i.e. an immediate kill.
+  const graceMs = Number(ctx.values.grace);
+  if (!Number.isInteger(graceMs) || graceMs <= 0 || graceMs > MAX_GRACE_MS) {
+    usageError(
+      ctx.sink,
+      `--grace must be a positive integer (ms) no greater than ${MAX_GRACE_MS}. Use --force for no grace period.`,
+    );
+    return null;
+  }
+
+  return { force, graceMs };
+}
+
+async function commandLifecycle(
+  ctx: Ctx,
+  action: "start" | "stop" | "restart",
+): Promise<number> {
+  const id = requireService(ctx);
+  if (!id) return EXIT.USAGE;
+
+  let body: Record<string, unknown>;
+  if (action === "start") {
+    body = { wait: ctx.values["no-wait"] !== true };
+  } else {
+    // Stop and restart both tear a process down, so both take the tuning; a
+    // restart additionally carries the wait flag for its start half.
+    const tuning = stopTuning(ctx);
+    if (!tuning) return EXIT.USAGE;
+    body =
+      action === "stop"
+        ? tuning
+        : { ...tuning, wait: ctx.values["no-wait"] !== true };
+  }
+
+  const result = await ctx.client.post<ServiceResponse>(
+    `/services/${encodeURIComponent(id)}/${action}`,
+    body,
+  );
+  if (result.kind !== "ok") return reportFailure(ctx, result);
+
+  if (ctx.json) emitJSON(ctx, result.data);
+  else
+    ctx.io.stdout(
+      `${result.data.service.name} is now ${ctx.color(result.data.service.status, "cyan")}.\n`,
+    );
+
+  return EXIT.OK;
+}
+
+async function commandStartAll(ctx: Ctx): Promise<number> {
+  const result = await ctx.client.post<StartAllResponse>("/start-all");
+  if (result.kind !== "ok") return reportFailure(ctx, result);
+
+  const { started, failed, skipped, total } = result.data;
+  if (ctx.json) emitJSON(ctx, result.data);
+  else
+    ctx.io.stdout(
+      `Started ${started}/${total} services (${failed} failed, ${skipped} skipped).\n`,
+    );
+
+  return failed > 0 ? EXIT.FAILED : EXIT.OK;
+}
+
+async function commandStopAll(ctx: Ctx): Promise<number> {
+  const tuning = stopTuning(ctx);
+  if (!tuning) return EXIT.USAGE;
+
+  const result = await ctx.client.post<StopAllResponse>("/stop-all", tuning);
+  if (result.kind !== "ok") return reportFailure(ctx, result);
+
+  const { stopped, failed, total } = result.data;
+  if (ctx.json) emitJSON(ctx, result.data);
+  else
+    ctx.io.stdout(`Stopped ${stopped}/${total} services (${failed} failed).\n`);
+
+  return failed > 0 ? EXIT.FAILED : EXIT.OK;
+}
+
+/** Parses `--type stdout,stderr` into a set; an empty set means "all". */
+function parseLogTypes(raw: unknown): Set<LogEntry["logType"]> | null {
+  const types = new Set<LogEntry["logType"]>();
+  if (raw === undefined) return types;
+
+  for (const part of String(raw).split(",")) {
+    const value = part.trim();
+    if (value === "") continue;
+    if (value !== "stdout" && value !== "stderr" && value !== "system") {
+      return null;
+    }
+    types.add(value);
+  }
+  return types;
+}
+
+async function commandLogs(ctx: Ctx): Promise<number> {
+  const id = requireService(ctx);
+  if (!id) return EXIT.USAGE;
+
+  const lines =
+    ctx.values.lines === undefined ? undefined : Number(ctx.values.lines);
+  if (lines !== undefined && (!Number.isInteger(lines) || lines < 0)) {
+    return usageError(ctx.sink, "--lines must be a non-negative integer.");
+  }
+
+  // A cursor is an opaque `<epoch>:<seq>` token rather than a bare number: the
+  // dashboard's sequence starts again at 1 when it restarts, so the epoch is
+  // what keeps a cursor from an earlier run from matching a reused number and
+  // silently skipping lines. `0` is the one number that still means something,
+  // namely the oldest buffered entry. The dashboard checks the epoch; this only
+  // catches a mistyped token before spending a round trip on it.
+  const cursor =
+    ctx.values.cursor === undefined ? undefined : String(ctx.values.cursor);
+  if (cursor !== undefined && !/^(?:0|[A-Za-z0-9_-]+:\d+)$/.test(cursor)) {
+    return usageError(
+      ctx.sink,
+      "--cursor must be a nextCursor from an earlier --json response, or 0 to start from the oldest buffered entry.",
+    );
+  }
+
+  if (ctx.values.follow === true) {
+    const logTypes = parseLogTypes(ctx.values.type);
+    if (logTypes === null) {
+      return usageError(
+        ctx.sink,
+        "--type accepts a comma-separated list of stdout, stderr, system.",
+      );
+    }
+
+    // `--since` and `--cursor` are buffer queries; following starts from the
+    // buffered tail and then streams live, so neither combines meaningfully.
+    if (ctx.values.since !== undefined) {
+      return usageError(ctx.sink, "--since cannot be combined with --follow.");
+    }
+    if (cursor !== undefined) {
+      return usageError(ctx.sink, "--cursor cannot be combined with --follow.");
+    }
+
+    return followLogs({
+      baseURL: ctx.baseURL,
+      timeoutMs: ctx.timeoutMs,
+      serviceID: id,
+      initialLines: lines ?? DEFAULT_FOLLOW_LINES,
+      logTypes,
+      json: ctx.json,
+      plain: ctx.values.plain === true,
+      color: ctx.color,
+      stdout: ctx.io.stdout,
+      stderr: ctx.io.stderr,
+      sink: ctx.sink,
+      signal: ctx.io.signal,
+    });
+  }
+
+  const params = new URLSearchParams();
+  if (lines !== undefined) {
+    params.set("limit", String(lines));
+  }
+  if (ctx.values.type !== undefined)
+    params.set("logType", String(ctx.values.type));
+  if (ctx.values.since !== undefined)
+    params.set("since", String(ctx.values.since));
+  if (cursor !== undefined) params.set("cursor", String(cursor));
+
+  const query = params.toString();
+  const path = `/services/${encodeURIComponent(id)}/logs${query ? `?${query}` : ""}`;
+
+  const result = await ctx.client.get<LogsResponse>(path);
+  if (result.kind !== "ok") return reportFailure(ctx, result);
+
+  if (ctx.json) {
+    emitJSON(ctx, result.data);
+    return EXIT.OK;
+  }
+
+  const { entries } = result.data;
+  if (entries.length === 0) {
+    // To stderr, so `dsd logs api | wc -l` stays honest about there being no lines.
+    ctx.io.stderr("dsd: no matching log lines.\n");
+    return EXIT.OK;
+  }
+
+  ctx.io.stdout(
+    ctx.values.plain === true
+      ? `${entries.flatMap(entryLines).join("\n")}\n`
+      : `${formatLogEntries(entries, ctx.color)}\n`,
+  );
+  return EXIT.OK;
+}
+
+async function commandClearLogs(ctx: Ctx): Promise<number> {
+  const id = requireService(ctx);
+  if (!id) return EXIT.USAGE;
+
+  const result = await ctx.client.delete<ClearLogsResponse>(
+    `/services/${encodeURIComponent(id)}/logs`,
+  );
+  if (result.kind !== "ok") return reportFailure(ctx, result);
+
+  if (ctx.json) emitJSON(ctx, result.data);
+  else ctx.io.stdout(`Cleared logs for ${id}.\n`);
+  return EXIT.OK;
+}
+
+async function commandSignal(ctx: Ctx): Promise<number> {
+  const id = requireService(ctx);
+  if (!id) return EXIT.USAGE;
+
+  const signal = ctx.positionals[1];
+  if (!signal) {
+    return usageError(
+      ctx.sink,
+      "a signal name is required, e.g. `dsd signal api SIGHUP`.",
+    );
+  }
+
+  const result = await ctx.client.post<SignalResponse>(
+    `/services/${encodeURIComponent(id)}/signal`,
+    { signal },
+  );
+  if (result.kind !== "ok") return reportFailure(ctx, result);
+
+  if (ctx.json) emitJSON(ctx, result.data);
+  else ctx.io.stdout(`Sent ${signal} to ${id}.\n`);
+  return EXIT.OK;
+}
+
+async function commandHealth(ctx: Ctx): Promise<number> {
+  const result = await ctx.client.get<HealthResponse>("/health");
+  if (result.kind !== "ok") return reportFailure(ctx, result);
+
+  if (ctx.json) emitJSON(ctx, result.data);
+  else
+    ctx.io.stdout(
+      `${result.data.dashboardName}: ${result.data.serviceCount} services, up ${Math.round(
+        result.data.uptimeMs / 1000,
+      )}s.\n`,
+    );
+
+  // A dashboard that is mid-teardown is reachable but not usable; say so with a
+  // distinct code rather than a cheerful 0.
+  return result.data.shuttingDown ? EXIT.SHUTTING_DOWN : EXIT.OK;
+}
+
+/** Exported for the help text tests. */
+export { COMMANDS };
+
+/**
+ * The default client deadline for a command, in ms (0 meaning "no deadline").
+ * Exported so a test can pin which commands are allowed to run unbounded.
+ */
+export const resolveTimeoutForTest = (commandName: string): number =>
+  resolveTimeout(undefined, commandName) ?? -1;

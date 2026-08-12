@@ -16,11 +16,16 @@ export function useWebSocket({
 }: UseWebSocketOptions) {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  // `ReturnType<typeof setTimeout>` rather than `NodeJS.Timeout`: this runs in
+  // the browser, where setTimeout returns a number, and the frontend package
+  // has no @types/node for the NodeJS namespace to resolve against.
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   const isUnmountedRef = useRef(false);
 
   // The socket's event handlers are bound once (on mount), so without this they
-  // would close over the callbacks from the first render forever — meaning
+  // would close over the callbacks from the first render forever, meaning
   // handlers like onClose/onMessage would see stale state (e.g. an empty
   // service list). Mirror the latest callbacks into a ref each render so the
   // handlers always invoke the current versions.
@@ -42,10 +47,13 @@ export function useWebSocket({
     }
   };
 
-  const sendGlobalAction = (action: string) => {
+  const sendGlobalAction = (
+    action: string,
+    payload?: Record<string, unknown>,
+  ) => {
     const ws = socketRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ action }));
+      ws.send(JSON.stringify({ action, ...payload }));
     } else {
       console.error("WebSocket not connected.");
     }

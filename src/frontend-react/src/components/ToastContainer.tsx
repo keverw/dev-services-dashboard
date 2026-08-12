@@ -66,8 +66,8 @@ function ToastContainer() {
 
   // Pin sticky toasts (duration 0, e.g. the Start All progress toast) to the
   // top so transient per-service toasts stream in below them rather than
-  // shoving them down. We keep the rendered (DOM) order stable — newest first,
-  // as added — and pin via CSS `order` instead of re-sorting the array. Moving
+  // shoving them down. We keep the rendered (DOM) order stable (newest first,
+  // as added) and pin via CSS `order` instead of re-sorting the array. Moving
   // DOM nodes between renders restarts their slide animations and causes a
   // visible jump; CSS `order` repositions them without touching the nodes.
   return (

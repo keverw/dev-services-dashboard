@@ -3,7 +3,7 @@
  *
  * Both sides import it as `@shared/protocol` (a tsconfig `paths` alias, plus a
  * Vite resolve alias for the frontend). It is intentionally dependency-free (no
- * Node or DOM types) so both toolchains can include it — the backend's imports
+ * Node or DOM types) so both toolchains can include it. The backend's imports
  * are type-only, so they erase at runtime and tsup just inlines the types into
  * the published `.d.ts`. It holds only the types that cross the HTTP/WebSocket
  * boundary; runtime-only types (e.g. `Service`, which holds a `ChildProcess`)
@@ -32,6 +32,17 @@ export type ServiceStatusValue =
   | "crashed";
 
 export interface LogEntry {
+  /**
+   * A gap-free counter that increases with every line the dashboard logs,
+   * across all services. This, not `timestamp`, is what a poller should page
+   * on: `timestamp` comes from `Date.now()`, so several entries routinely
+   * share one millisecond and a `since`-style filter would drop the ones that
+   * landed after the cursor within the same tick. The control API's `cursor`
+   * query and `nextCursor` response field are built on these numbers, paired
+   * with an id for the dashboard run that issued them: the counter starts again
+   * at 1 with the process, so a number alone repeats across restarts.
+   */
+  seq: number;
   timestamp: number;
   line: string;
   logType: "stdout" | "stderr" | "system";
@@ -67,6 +78,8 @@ export type ServerMessage =
       line: string;
       logType: LogEntry["logType"];
       timestamp: number;
+      /** The entry's `LogEntry.seq`, so a live line is identified the same way a buffered one is. */
+      seq: number;
     }
   | {
       type: "status_update";
@@ -104,6 +117,30 @@ export type ServerMessage =
 /** Messages the client sends to the server, discriminated on `action`. */
 export type ClientMessage =
   | { action: "start_all" }
-  | { action: "stop_all" }
-  | { action: "start" | "stop" | "restart" | "clear_logs"; serviceID: string }
+  | {
+      action: "stop_all";
+      /** Force-kill every service, including ones already `stopping`. */
+      force?: boolean;
+      /** Override the grace period for every stop in this run. */
+      graceMs?: number;
+    }
+  | { action: "start" | "clear_logs"; serviceID: string }
+  | {
+      action: "stop" | "restart";
+      serviceID: string;
+      /**
+       * Skip the graceful phase and SIGKILL the process immediately, instead of
+       * SIGTERM followed by the service's `stopTimeout` grace period. Also
+       * accepted while the service is already `stopping`, where it cuts short
+       * the grace period of the stop already in flight.
+       */
+      force?: boolean;
+      /**
+       * Override how long this stop waits before escalating to SIGKILL, instead
+       * of the service's configured `stopTimeout`. Non-positive values fall back
+       * to the configured value; `force` (no grace period at all) takes
+       * precedence over both.
+       */
+      graceMs?: number;
+    }
   | { action: "send_signal"; serviceID: string; signal: string };

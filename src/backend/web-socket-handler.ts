@@ -1,7 +1,31 @@
 import { Logger } from "./logger";
-import { ServiceManager } from "./service-manager";
+import { MAX_TIMER_MS, ServiceManager } from "./service-manager";
 import { type WebSocket } from "ws";
 import type { ServerMessage } from "@shared/protocol";
+
+/**
+ * Reads the optional stop tuning off a `stop` / `restart` frame.
+ *
+ * Only an explicit `true` counts as `force`, so a stray value can't turn a
+ * normal stop into a kill. A `graceMs` that isn't a number, or is out of the
+ * range `setTimeout` can represent, is dropped rather than passed through (the
+ * manager treats a non-positive grace as "unset" and falls back to the
+ * configured `stopTimeout`). The upper bound matters: Node clamps an oversized
+ * delay to 1ms, so an unchecked value would mean an immediate SIGKILL instead
+ * of the long grace period the frame asked for.
+ */
+function readStopOptions(data: Record<string, unknown>): {
+  force: boolean;
+  graceMs?: number;
+} {
+  const { force, graceMs } = data as { force?: unknown; graceMs?: unknown };
+  const usableGrace =
+    typeof graceMs === "number" && graceMs > 0 && graceMs <= MAX_TIMER_MS;
+  return {
+    force: force === true,
+    graceMs: usableGrace ? graceMs : undefined,
+  };
+}
 
 export class WebSocketHandler {
   private serviceManager: ServiceManager;
@@ -79,7 +103,7 @@ export class WebSocketHandler {
     }
 
     if (action === "stop_all") {
-      await this.serviceManager.stopAllServices();
+      await this.serviceManager.stopAllServices(readStopOptions(data));
       return;
     }
 
@@ -114,10 +138,13 @@ export class WebSocketHandler {
         await this.serviceManager.startAndWait(serviceID);
         break;
       case "stop":
-        await this.serviceManager.stopService(serviceID);
+        await this.serviceManager.stopService(serviceID, readStopOptions(data));
         break;
       case "restart":
-        await this.serviceManager.restartService(serviceID);
+        await this.serviceManager.restartService(
+          serviceID,
+          readStopOptions(data),
+        );
         break;
       case "clear_logs":
         this.serviceManager.clearServiceLogs(serviceID);

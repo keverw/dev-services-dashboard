@@ -2,7 +2,7 @@ import { ChildProcess } from "child_process";
 import { type Server as HttpServer } from "http";
 import { WebSocketServer } from "ws";
 // These backend types build on the shared wire protocol; we import the wire
-// types we need internally. Nothing is re-exported from here — the package's
+// types we need internally. Nothing is re-exported from here; the package's
 // public type surface is defined explicitly in index.ts.
 import type {
   LogEntry,
@@ -42,7 +42,7 @@ export interface BeforeStartResult {
 
 /**
  * Context passed to a service's `afterStart` hook. The hook runs after the
- * process has spawned but before the service is reported `running` — so it acts
+ * process has spawned but before the service is reported `running`, so it acts
  * as a readiness/post-start gate (e.g. wait for the port to accept connections,
  * run a DB migration). Throwing tears the just-started process back down and
  * puts the service into the `error` state.
@@ -62,7 +62,7 @@ export interface AfterStartContext {
   log: (line: string) => void;
   /**
    * Aborted if the service is stopped while the hook runs, or if the process
-   * exits/crashes on its own under it — so a readiness check that polls the
+   * exits/crashes on its own under it, so a readiness check that polls the
    * process (e.g. `await waitForPort(port, { signal })`) can give up. Note a
    * hook that throws is still treated as a failed start (`error`) even when the
    * throw was its response to this abort.
@@ -156,7 +156,7 @@ export interface Service {
 export interface DevUIConfig {
   port?: number;
   /**
-   * Host/interface to bind the server to. Default: "localhost" (loopback only —
+   * Host/interface to bind the server to. Default: "localhost" (loopback only,
    * reachable from this machine alone). Set to "0.0.0.0" (or a specific
    * interface IP) to expose the dashboard on your LAN. Note: the dashboard has
    * no authentication and can start/stop/signal processes on the host, so only

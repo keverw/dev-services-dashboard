@@ -10,9 +10,11 @@ import jsxA11y from "eslint-plugin-jsx-a11y";
 export default [
   js.configs.recommended,
 
-  // Backend / library TypeScript
+  // Backend / library TypeScript, the shared wire types, and the CLI. All three
+  // are plain Node-targeted TypeScript, so they share one block. Without it the
+  // default (espree) parser would be used and fail on TS syntax.
   {
-    files: ["src/backend/**/*.ts"],
+    files: ["src/backend/**/*.ts", "src/cli/**/*.ts", "src/shared/**/*.ts"],
     languageOptions: {
       parser: tsParser,
       parserOptions: { sourceType: "module" },
@@ -66,7 +68,7 @@ export default [
       ...jsxA11y.flatConfigs.recommended.rules,
       "react/react-in-jsx-scope": "off",
       "no-undef": "off",
-      // React Compiler rules (react-hooks v7) — warn only, codebase predates compiler
+      // React Compiler rules (react-hooks v7): warn only, codebase predates compiler
       "react-hooks/preserve-manual-memoization": "warn",
       "react-hooks/immutability": "warn",
       "react-hooks/set-state-in-effect": "warn",
