@@ -4,8 +4,16 @@ import { createServer } from "net";
 // Mock child_process so services "spawn" without launching anything real. The
 // fake process reports a successful spawn on the next tick, which is what drives
 // a service to `running`.
+//
+// The manager spawns two kinds of child, and they exit differently: a service
+// command runs until something kills it, while the escaped-descendant sweep's
+// `ps` is a one-shot that exits on its own. A stub that only ever exits from
+// `kill()` models the first and hangs as the second, leaving every force-stop
+// here to wait out the sweep's 2s guard. Reporting a clean, empty `ps` keeps
+// these tests off that path (the guard itself is covered in
+// service-manager.test.ts, which drives `ps` deliberately).
 mock.module("child_process", () => ({
-  spawn: mock(() => {
+  spawn: mock((cmd: string) => {
     const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
     const mockProcess = {
       on: mock((event: string, callback: (...args: unknown[]) => void) => {
@@ -27,6 +35,12 @@ mock.module("child_process", () => ({
       removeAllListeners: mock(),
       pid: 4242,
     };
+    // No stdout, so the sweep parses an empty table and finds no descendants.
+    if (cmd === "ps") {
+      setTimeout(() => {
+        for (const cb of listeners.close ?? []) cb(0, null);
+      }, 0);
+    }
     return mockProcess;
   }),
 }));

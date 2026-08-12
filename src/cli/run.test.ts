@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { createServer } from "net";
 
 // Same fake child process the control-API tests use: reports a successful spawn,
-// and reports an exit when killed so stops resolve promptly.
+// reports an exit when killed so stops resolve promptly, and answers the
+// escaped-descendant sweep's `ps` with a clean empty table so `--force` doesn't
+// wait out the sweep's 2s guard (see api-router.test.ts for the full rationale).
 mock.module("child_process", () => ({
-  spawn: mock(() => {
+  spawn: mock((cmd: string) => {
     const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
     const mockProcess = {
       on: mock((event: string, callback: (...args: unknown[]) => void) => {
@@ -24,6 +26,11 @@ mock.module("child_process", () => ({
       removeAllListeners: mock(),
       pid: 4242,
     };
+    if (cmd === "ps") {
+      setTimeout(() => {
+        for (const cb of listeners.close ?? []) cb(0, null);
+      }, 0);
+    }
     return mockProcess;
   }),
 }));
