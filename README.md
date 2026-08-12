@@ -1,4 +1,4 @@
-# Dev Services Dashboard v1.1.0
+# Dev Services Dashboard v2.0.0
 
 [![npm version](https://badge.fury.io/js/dev-services-dashboard.svg)](https://badge.fury.io/js/dev-services-dashboard)
 

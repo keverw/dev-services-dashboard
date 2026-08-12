@@ -12,7 +12,7 @@
   - [UX / fixes](#ux--fixes)
   - [Tests](#tests)
   - [Build / tooling](#build--tooling)
-- [1.1.0 (August 12, 2026)](#110-august-12-2026)
+- [2.0.0 (August 12, 2026)](#200-august-12-2026)
   - [Features](#features-1)
   - [Fixes](#fixes)
   - [Tests](#tests-1)
@@ -105,7 +105,7 @@
 - Fixed pre-existing lint errors surfaced by the new config (`any` types, unused vars, `ToastContext` forward-reference bug)
 - Cleared all remaining React Hooks lint warnings; `bun run lint` is now warning-free: derived `theme` in `ThemeContext` instead of mirroring it into state via an effect, removed a redundant `activeTabId` read from the mount-only load effect, deleted the unused legacy `Toast.tsx` component, and added scoped suppressions (with reasons) for the intentional mount-once WebSocket effect and two `Date.now()` calls in non-render event handlers
 
-## 1.1.0 (August 12, 2026)
+## 2.0.0 (August 12, 2026)
 
 ### Features
 
@@ -148,6 +148,7 @@
 
 ### Build / tooling
 
+- Refreshed compatible direct and transitive dependencies, including `ws` 8.21.3, and regenerated `bun.lock`; `bun audit` reports no vulnerabilities.
 - `tsup` now builds two entries: the library (`dist/index.js`) and the CLI (`dist/bin.js`, with its shebang preserved). Type declarations are still emitted only for the library. The CLI bundle pulls in only `node:` builtins plus `ws` (used by `logs --follow`, and already a runtime dependency): no `mime-types`, and none of the server code.
 - The CLI's version is injected at build time rather than importing `package.json`, which `rootDir: "src"` puts outside the TypeScript program. Running from source reports `0.0.0-dev`.
 - Added a `dsd` npm script (`bun run dsd <args>`) that runs the CLI straight from TypeScript source, so working on it needs no build step between an edit and a test. Repo-only, in an installed project the command is just `dsd`.
