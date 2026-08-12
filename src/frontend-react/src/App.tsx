@@ -161,8 +161,8 @@ function AppContent() {
           // Reconcile web links from the authoritative initial_state. A
           // beforeStart/afterStart hook can change a service's links (and a
           // stop reverts them to the baseline), and a links_update broadcast
-          // can be missed while disconnected — and /api/services-config is only
-          // fetched once on mount — so refresh them here on every (re)connect.
+          // can be missed while disconnected, and /api/services-config is only
+          // fetched once on mount, so refresh them here on every (re)connect.
           setActiveServicesConfig((prev) =>
             prev.map((cfg) => {
               const fresh = services.find((s) => s.id === cfg.id);
@@ -186,7 +186,7 @@ function AppContent() {
           updateServiceStatus(data.serviceID, data.status, data.errorDetails);
 
           // Add toast notifications for individual service status changes
-          // (but not during Start All / Stop All — those drive their own
+          // (but not during Start All / Stop All, since those drive their own
           // per-service toasts, so this would duplicate them)
           if (!startAllInProgressRef.current && !stopAllInProgressRef.current) {
             const service = activeServicesConfig.find(
@@ -244,7 +244,7 @@ function AppContent() {
         // start_all_begin), initialize now so raw status toasts stay suppressed
         // and a progress toast shows. (If the run already finished during the
         // reconnect gap, no progress events arrive and initial_state shows the
-        // final statuses — nothing to do.)
+        // final statuses, so nothing to do.)
         if (!startAllInProgressRef.current) {
           setStartAllInProgress(true);
           startAllInProgressRef.current = true;
@@ -421,7 +421,7 @@ function AppContent() {
 
   function handleWebSocketClose() {
     setConnected(false);
-    // A Start All in flight won't get its `start_all_done` now — reset so the
+    // A Start All in flight won't get its `start_all_done` now; reset so the
     // UI isn't wedged, and drop its progress toast.
     setStartAllInProgress(false);
     startAllInProgressRef.current = false;
@@ -442,7 +442,7 @@ function AppContent() {
     // Show a single sticky toast until we reconnect.
     if (!disconnectToastIdRef.current) {
       disconnectToastIdRef.current = addToast({
-        message: "Disconnected from server — reconnecting…",
+        message: "Disconnected from server, reconnecting…",
         type: "error",
         duration: 0,
       });
@@ -594,7 +594,7 @@ function AppContent() {
     // The server stops services in reverse dependency order and broadcasts
     // stop_all_* progress; we just render those (suppress our own toast here).
     // A forced run also sweeps up services already stuck in `stopping` from the
-    // run it's escalating, so it needs its own toast — the in-flight progress
+    // run it's escalating, so it needs its own toast: the in-flight progress
     // toast would otherwise be the only feedback that the click registered.
     if (force) {
       addToast({

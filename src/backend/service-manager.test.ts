@@ -116,7 +116,7 @@ const spawnMock = mock(
           proc.emit("error", new Error("ps failed"));
           return;
         }
-        // "hang": never close or error — exercises the reap's guard timeout.
+        // "hang": never close or error, exercising the reap's guard timeout.
         if (psBehavior === "hang") return;
         if (psOutput) proc.stdout.emit(Buffer.from(psOutput));
         proc.emit("close", 0);
@@ -200,7 +200,7 @@ let killSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
   // Collapse long timers (the 5s SIGKILL fallback, the 500ms restart gap, the
-  // Start All wait windows) so tests stay fast — but to a value comfortably
+  // Start All wait windows) so tests stay fast, but to a value comfortably
   // above the mock's 0ms "spawn"/exit emits, so a service still reaches
   // "running" before its Start All start-timeout would fire.
   realSetTimeout = globalThis.setTimeout;
@@ -248,7 +248,7 @@ afterAll(() => {
 
 // --- Existing behavior (regression) -----------------------------------------
 
-describe("ServiceManager — core behavior", () => {
+describe("ServiceManager: core behavior", () => {
   it("initializes services with stopped status", () => {
     const { sm } = makeManager([svc("a")]);
     expect(sm.getService("a")?.status).toBe("stopped");
@@ -297,7 +297,7 @@ describe("ServiceManager — core behavior", () => {
     await sm.stopService("a");
     // SIGTERM goes straight to the process so it can coordinate its own
     // children, and (unlike the default path) no group SIGKILL is sent when it
-    // exits — those children are the main's responsibility.
+    // exits: those children are the main's responsibility.
     expect(killSpy.mock.calls.some(([pid]) => Number(pid) < 0)).toBe(false);
     expect(killLog.some((k) => k.signal === "SIGTERM")).toBe(true);
     expect(sm.getService("a")?.status).toBe("stopped");
@@ -479,14 +479,14 @@ describe("ServiceManager — core behavior", () => {
 
     const proc = spawnedProcesses[0];
     // Ignore every signal so the service lingers in `stopping` until we emit the
-    // exit ourselves — a deterministic stopping window to race a start against.
+    // exit ourselves: a deterministic stopping window to race a start against.
     proc.exitOnSignals = new Set();
 
     const stop = sm.stopService("a");
     await tick();
     expect(sm.getService("a")?.status).toBe("stopping");
 
-    // Request a start mid-stop. It must NOT resolve false (silent failure) — it
+    // Request a start mid-stop. It must NOT resolve false (silent failure); it
     // waits for the stop to finish and then starts a fresh run.
     const startResult = sm.startAndWait("a");
     await tick();
@@ -608,7 +608,7 @@ describe("ServiceManager — core behavior", () => {
 
 // --- Custom signals ---------------------------------------------------------
 
-describe("ServiceManager — sendSignal", () => {
+describe("ServiceManager: sendSignal", () => {
   // A service that declares SIGHUP in its allow-list.
   const sigHupSvc = (id: string) =>
     svc(id, { signals: [{ label: "Reload", signal: "SIGHUP" }] });
@@ -653,7 +653,7 @@ describe("ServiceManager — sendSignal", () => {
 
 // --- dependsOn --------------------------------------------------------------
 
-describe("ServiceManager — dependsOn ordering", () => {
+describe("ServiceManager: dependsOn ordering", () => {
   const ids = (sm: ServiceManager) => sm.getServices().map((s) => s.id);
 
   it("leaves services without dependsOn in config order", () => {
@@ -749,7 +749,7 @@ describe("ServiceManager — dependsOn ordering", () => {
 
 // --- startAllServices orchestration -----------------------------------------
 
-describe("ServiceManager — startAllServices", () => {
+describe("ServiceManager: startAllServices", () => {
   const findDone = (broadcasts: Array<Record<string, unknown>>) =>
     broadcasts.find((b) => b.type === "start_all_done");
 
@@ -804,13 +804,13 @@ describe("ServiceManager — startAllServices", () => {
 
 // --- startAndWait dedup -----------------------------------------------------
 
-describe("ServiceManager — startAndWait dedup", () => {
+describe("ServiceManager: startAndWait dedup", () => {
   it("dedupes concurrent starts so an orphaned timer can't tear down a running service", async () => {
     const { sm } = makeManager([svc("a")]);
 
     // Two concurrent starts for the same service. Before the dedup fix, the
     // second call overwrote the first's waiter in `startWaiters`, orphaning the
-    // first call's start-timeout timer — which then fired against the
+    // first call's start-timeout timer, which then fired against the
     // now-`running` service and wrongly tore it down into `error`.
     const p1 = sm.startAndWait("a");
     const p2 = sm.startAndWait("a");
@@ -834,10 +834,10 @@ describe("ServiceManager — startAndWait dedup", () => {
   });
 });
 
-describe("ServiceManager — stopAllServices", () => {
+describe("ServiceManager: stopAllServices", () => {
   it("stays silent when there are no running services to stop", async () => {
     // Server shutdown with nothing running should not broadcast a begin/done
-    // pair — that rendered a confusing "0 services stopped" toast in the UI.
+    // pair, which rendered a confusing "0 services stopped" toast in the UI.
     const { sm, broadcasts } = makeManager([svc("a"), svc("b")]);
     await sm.stopAllServices();
     expect(broadcasts.find((b) => b.type === "stop_all_begin")).toBeUndefined();
@@ -867,7 +867,7 @@ describe("ServiceManager — stopAllServices", () => {
   });
 });
 
-describe("ServiceManager — shutdown latch", () => {
+describe("ServiceManager: shutdown latch", () => {
   it("isShuttingDown flips once beginShutdown is called", () => {
     const { sm } = makeManager([svc("a")]);
     expect(sm.isShuttingDown()).toBe(false);
@@ -919,7 +919,7 @@ describe("ServiceManager — shutdown latch", () => {
 
 // --- beforeStart hook -------------------------------------------------------
 
-describe("ServiceManager — beforeStart hook", () => {
+describe("ServiceManager: beforeStart hook", () => {
   it("runs the hook before spawn and passes the returned env", async () => {
     let ranBeforeSpawn = false;
     const { sm } = makeManager([
@@ -977,7 +977,7 @@ describe("ServiceManager — beforeStart hook", () => {
     await sm.stopService("a");
     await startAndRun(sm, "a");
     // The hook always sees the configured baseline, so a second run yields the
-    // same two links — not three.
+    // same two links, not three.
     expect(sm.getService("a")?.liveWebLinks).toEqual([
       { label: "Original", url: "http://x/1" },
       { label: "Added", url: "http://x/2" },
@@ -1100,7 +1100,7 @@ describe("ServiceManager — beforeStart hook", () => {
     expect(env.STALE).toBeUndefined();
 
     // The stale run-1 hook finally settles, returning env/links long after the
-    // abort — they must NOT be applied to the freshly-started service.
+    // abort: they must NOT be applied to the freshly-started service.
     releaseOld();
     await tick();
     await tick();
@@ -1134,7 +1134,7 @@ describe("ServiceManager — beforeStart hook", () => {
     await tick();
     expect(sm.getService("a")?.status).toBe("initializing");
 
-    // Restart while initializing must abort run 1 and begin a FRESH run — not
+    // Restart while initializing must abort run 1 and begin a FRESH run, not
     // rejoin (and resolve with) the aborted in-flight startAndWait.
     await sm.restartService("a");
     await tick();
@@ -1185,7 +1185,7 @@ describe("ServiceManager — beforeStart hook", () => {
 
 // --- afterStart hook --------------------------------------------------------
 
-describe("ServiceManager — afterStart hook", () => {
+describe("ServiceManager: afterStart hook", () => {
   it("runs after spawn and promotes to running once it resolves", async () => {
     let ranAfterSpawn = false;
     const { sm } = makeManager([
@@ -1335,7 +1335,7 @@ describe("ServiceManager — afterStart hook", () => {
     await tick();
     expect(sm.getService("a")?.status).toBe("stopped");
 
-    // Hook now resolves with links — they must NOT be applied to a dead service.
+    // Hook now resolves with links: they must NOT be applied to a dead service.
     release({ webLinks: [{ label: "Stale", url: "http://x/1" }] });
     await tick();
     expect(sm.getService("a")?.status).toBe("stopped"); // not promoted to running
@@ -1430,7 +1430,7 @@ describe("ServiceManager — afterStart hook", () => {
     await startAndRun(sm, "a");
     expect(sm.getService("a")?.status).toBe("running");
 
-    // The stale run-1 hook finally throws — it must not tear down run 2.
+    // The stale run-1 hook finally throws; it must not tear down run 2.
     throwOld(new Error("late failure"));
     await tick();
     await tick();
@@ -1474,7 +1474,7 @@ describe("ServiceManager — afterStart hook", () => {
       svc("b", { dependsOn: ["a"] }),
     ]);
     // startAllServices awaits the timeout teardown, so by the time it resolves
-    // the process is already gone — no extra ticks needed.
+    // the process is already gone, so no extra ticks are needed.
     await sm.startAllServices();
 
     const a = sm.getService("a");
@@ -1529,7 +1529,7 @@ describe("ServiceManager — afterStart hook", () => {
     ]);
 
     // A manual start goes through startAndWait, so the afterStart timeout
-    // applies just like during Start All — it must not park in finalizing.
+    // applies just like during Start All: it must not park in finalizing.
     await sm.startAndWait("a");
 
     const a = sm.getService("a");
@@ -1853,7 +1853,7 @@ describe("force stop", () => {
 
   it("escalates a stop already in flight, and settles it once", async () => {
     // A service that ignores SIGTERM wedges in `stopping` until its stopTimeout
-    // elapses — the case Force Stop exists for.
+    // elapses, the case Force Stop exists for.
     const { sm } = makeManager([svc("a", { stopTimeout: 60_000 })], {
       timeouts: { stopTimeout: 60_000 },
     });
@@ -1868,7 +1868,7 @@ describe("force stop", () => {
     expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(false);
 
     // The forced call must escalate the existing stop rather than start a
-    // second one — and the original caller's promise must still resolve.
+    // second one, and the original caller's promise must still resolve.
     const forced = sm.stopService("a", { force: true });
     await Promise.all([graceful, forced]);
 
@@ -1908,7 +1908,7 @@ describe("graceMs override", () => {
     spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
 
     killLog.length = 0;
-    // 0 must not mean "SIGKILL immediately" — `force` is the way to ask for that.
+    // 0 must not mean "SIGKILL immediately"; `force` is the way to ask for that.
     const stop = sm.stopService("a", { graceMs: 0 });
     await new Promise((r) => realSetTimeout(r, 20));
     expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(false);
@@ -1930,6 +1930,83 @@ describe("graceMs override", () => {
     expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(true);
     expect(sm.getService("a")!.status).toBe("running");
   });
+
+  // The two tests below need REAL timers. The suite-wide mock collapses any
+  // delay >= 200ms to 20ms, which would erase the very distinction each one
+  // exists to prove: a "long" grace period and a clamped-vs-overflowed one both
+  // become 20ms, so they'd pass just as happily against the unfixed code.
+  const withRealTimers = async (body: () => Promise<void>) => {
+    const mocked = globalThis.setTimeout;
+    globalThis.setTimeout = realSetTimeout;
+    try {
+      await body();
+    } finally {
+      globalThis.setTimeout = mocked;
+    }
+  };
+
+  /** Resolves to "timeout" if `p` hasn't settled within `ms`. */
+  const settlesWithin = (p: Promise<unknown>, ms: number) => {
+    let timer: ReturnType<typeof setTimeout>;
+    return Promise.race([
+      p.then(() => "settled"),
+      new Promise((r) => {
+        timer = realSetTimeout(() => r("timeout"), ms);
+      }),
+      // Clear the loser so a won race doesn't leave a live timer behind.
+    ]).finally(() => clearTimeout(timer));
+  };
+
+  it("re-arms a stop already in flight rather than doing nothing", async () => {
+    await withRealTimers(async () => {
+      // The wedged case: a stop is sitting on a 5s grace period, and a later
+      // request wants to cut that short without jumping straight to SIGKILL.
+      const { sm } = makeManager([svc("a", { stopTimeout: 5_000 })], {
+        timeouts: { stopTimeout: 5_000 },
+      });
+      await startAndRun(sm, "a");
+      spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
+
+      killLog.length = 0;
+      const graceful = sm.stopService("a");
+      await new Promise((r) => realSetTimeout(r, 30));
+      expect(sm.getService("a")!.status).toBe("stopping");
+      expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(false);
+
+      // Must escalate on the new 30ms window, and settle the original caller
+      // too. Without the fix this call is a no-op and `graceful` sits on its
+      // original 5s grace period, so the race below reports "timeout".
+      const retimed = sm.stopService("a", { graceMs: 30 });
+      expect(await settlesWithin(Promise.all([graceful, retimed]), 1_000)).toBe(
+        "settled",
+      );
+
+      expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(true);
+      expect(sm.getService("a")!.status).toBe("stopped");
+    });
+  });
+
+  it("does not let an oversized override collapse the grace period", async () => {
+    await withRealTimers(async () => {
+      // Above setTimeout's 32-bit ceiling Node clamps the delay to 1ms, so
+      // without `clampTimerMs` this asks for ~35 days and gets an immediate
+      // SIGKILL instead.
+      const { sm } = makeManager([svc("a", { stopTimeout: 5_000 })], {
+        timeouts: { stopTimeout: 5_000 },
+      });
+      await startAndRun(sm, "a");
+      spawnedProcesses[0].exitOnSignals.delete("SIGTERM");
+
+      killLog.length = 0;
+      const stop = sm.stopService("a", { graceMs: 3_000_000_000 });
+      await new Promise((r) => realSetTimeout(r, 60));
+      expect(killLog.some((k) => k.signal === "SIGKILL")).toBe(false);
+
+      // Clean up: the clamped timer would otherwise outlive the test.
+      await sm.stopService("a", { force: true });
+      await stop;
+    });
+  });
 });
 
 describe("force stop all", () => {
@@ -1945,7 +2022,7 @@ describe("force stop all", () => {
   });
 
   it("sweeps up services already stuck in `stopping`", async () => {
-    // A normal stop-all skips anything already `stopping` — but those are
+    // A normal stop-all skips anything already `stopping`, but those are
     // exactly the services a Force Stop All has to reach.
     const { sm } = makeManager([svc("a", { stopTimeout: 60_000 })], {
       timeouts: { stopTimeout: 60_000 },

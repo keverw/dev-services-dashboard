@@ -57,7 +57,7 @@ export function ToastProvider({ children }: ToastProviderProps) {
   );
 
   // Begin the exit animation for a toast, then unmount it once the animation
-  // has finished. Idempotent — a toast already exiting is left alone.
+  // has finished. Idempotent: a toast already exiting is left alone.
   const removeToast = useCallback((id: string) => {
     if (removalTimers.current.has(id)) return;
 
@@ -93,7 +93,7 @@ export function ToastProvider({ children }: ToastProviderProps) {
         defaultDuration = 6000;
       }
 
-      // `duration: 0` means "sticky" — stays until explicitly removed.
+      // `duration: 0` means "sticky": stays until explicitly removed.
       const duration = toast.duration ?? defaultDuration;
       const newToast: Toast = { ...toast, id, duration };
 
@@ -102,7 +102,7 @@ export function ToastProvider({ children }: ToastProviderProps) {
 
         // Cap the number of *dismissable* toasts on screen, animating out the
         // oldest extras instead of dropping them abruptly. Sticky toasts
-        // (duration 0, e.g. a live progress toast) are never evicted — they
+        // (duration 0, e.g. a live progress toast) are never evicted; they
         // stay until explicitly removed. Deferred so we don't call setState
         // from within this updater.
         const evictable = next.filter(

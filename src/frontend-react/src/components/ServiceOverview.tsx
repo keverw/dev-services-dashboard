@@ -9,7 +9,7 @@ interface ServiceOverviewProps {
 }
 
 // A grid overview of every service and its current status. Clicking a card
-// jumps straight to that service's tab — handy when there are more services
+// jumps straight to that service's tab, handy when there are more services
 // than fit in the tab bar.
 function ServiceOverview({
   services,

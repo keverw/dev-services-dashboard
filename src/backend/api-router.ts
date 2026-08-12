@@ -1,5 +1,5 @@
 import { IncomingMessage, ServerResponse } from "http";
-import { ServiceManager } from "./service-manager";
+import { MAX_TIMER_MS, ServiceManager } from "./service-manager";
 import { Logger } from "./logger";
 import { Service } from "./types";
 import type { LogEntry } from "@shared/protocol";
@@ -118,8 +118,8 @@ class ApiFailure extends Error {
  * The JSON control API backing the CLI (and any external tool driving the
  * dashboard directly with `curl`).
  *
- * Kept out of `HttpHandler` — which is a small composition root for "static
- * assets, else the one legacy endpoint" — because this needs method matching,
+ * Kept out of `HttpHandler` (which is a small composition root for "static
+ * assets, else the one legacy endpoint") because this needs method matching,
  * path parameters, body parsing, and a consistent error envelope. Keeping it
  * separate also means it can be exercised without booting a server.
  *
@@ -131,7 +131,7 @@ class ApiFailure extends Error {
  * is written under.
  *
  * The one exposure a REST API adds over the existing WebSocket is cross-origin
- * form/`fetch` POSTs from a random web page the developer happens to visit — a
+ * form/`fetch` POSTs from a random web page the developer happens to visit. A
  * CORS *simple request* needs no preflight, so the side effect would land even
  * though the attacker can't read the response. Two cheap guards close that
  * without introducing tokens: mutating requests must be `application/json`
@@ -171,13 +171,13 @@ export class ApiRouter {
   private async route(req: IncomingMessage, res: ServerResponse, url: URL) {
     const method = req.method ?? "GET";
     // Trailing slashes are tolerated so `/api/v1/services/` behaves like
-    // `/api/v1/services` — a common curl-by-hand slip.
+    // `/api/v1/services`, a common curl-by-hand slip.
     const path = url.pathname.replace(/\/+$/, "") || API_PREFIX;
     const segments = path.slice(API_PREFIX.length).split("/").filter(Boolean);
 
     this.assertSameOrigin(req);
 
-    // GET /api/v1 — the self-describing index.
+    // GET /api/v1: the self-describing index.
     if (segments.length === 0) {
       this.assertMethod(method, ["GET"]);
       const body: ApiIndexResponse = {
@@ -269,7 +269,19 @@ export class ApiRouter {
       return;
     }
 
-    const serviceID = decodeURIComponent(rest[0]);
+    // A malformed escape (e.g. `/api/v1/services/%ZZ`) throws a URIError, which
+    // is a caller mistake, not a dashboard fault. Without this it would unwind
+    // to the generic handler and be reported as a logged 500.
+    let serviceID: string;
+    try {
+      serviceID = decodeURIComponent(rest[0]);
+    } catch {
+      throw new ApiFailure(
+        "bad_request",
+        `Service id is not valid percent-encoding: "${rest[0]}".`,
+      );
+    }
+
     const service = this.serviceManager.getService(serviceID);
     if (!service) {
       throw new ApiFailure(
@@ -362,7 +374,7 @@ export class ApiRouter {
     const service = this.summaryOf(serviceID);
 
     // A service that was already `error`/`crashed` stays in that state after a
-    // stop — the process is gone either way, so that's a successful stop, not a
+    // stop: the process is gone either way, so that's a successful stop, not a
     // failure. Only a still-live state means the stop didn't take.
     if (
       service.status !== "stopped" &&
@@ -548,7 +560,7 @@ export class ApiRouter {
       returned: entries.length,
       bufferSize,
       bufferLimit,
-      // At the cap, older lines have already been evicted — a `since` poller
+      // At the cap, older lines have already been evicted, so a `since` poller
       // needs to know it may have missed some.
       truncated: bufferSize >= bufferLimit,
     });
@@ -588,7 +600,7 @@ export class ApiRouter {
   /**
    * Rejects a request whose `Origin` isn't this server. Browsers set `Origin`
    * on cross-origin requests but tools like curl omit it entirely, so an absent
-   * header is allowed through — this is a CSRF guard, not authentication.
+   * header is allowed through. This is a CSRF guard, not authentication.
    */
   private assertSameOrigin(req: IncomingMessage) {
     const origin = req.headers.origin;
@@ -758,7 +770,7 @@ export class ApiRouter {
  *
  * This mapper is the only thing that should ever produce an API service object.
  * `Service` holds a live `ChildProcess` (circular, so `JSON.stringify` throws)
- * plus the resolved `env` and `command`, and this API is unauthenticated — so
+ * plus the resolved `env` and `command`, and this API is unauthenticated, so
  * the safe fields are listed explicitly here rather than spread from the source.
  */
 function toSummary(service: Service): ServiceSummary {
@@ -801,6 +813,12 @@ function readWaitFlag(body: Record<string, unknown> | undefined): boolean {
  * and stop-all. `graceMs` must be a positive integer: rejecting 0 outright,
  * rather than silently treating it as "no grace period", keeps `force` the one
  * explicit way to ask for an immediate kill.
+ *
+ * The upper bound is what `setTimeout` can actually represent. Above it Node
+ * clamps the delay to 1ms, so an enormous `graceMs` would SIGKILL the service
+ * almost immediately, the opposite of the request. Rejecting is better than
+ * silently clamping: a caller asking for a 35-day grace period has made a
+ * mistake (most likely seconds/ms confusion) and should hear about it.
  */
 function readStopTuning(body: Record<string, unknown> | undefined): {
   force: boolean;
@@ -810,10 +828,15 @@ function readStopTuning(body: Record<string, unknown> | undefined): {
 
   const raw = body?.graceMs;
   if (raw === undefined) return { force };
-  if (typeof raw !== "number" || !Number.isInteger(raw) || raw <= 0) {
+  if (
+    typeof raw !== "number" ||
+    !Number.isInteger(raw) ||
+    raw <= 0 ||
+    raw > MAX_TIMER_MS
+  ) {
     throw new ApiFailure(
       "bad_request",
-      '"graceMs" must be a positive integer. Use {"force":true} for no grace period.',
+      `"graceMs" must be a positive integer no greater than ${MAX_TIMER_MS}. Use {"force":true} for no grace period.`,
     );
   }
 

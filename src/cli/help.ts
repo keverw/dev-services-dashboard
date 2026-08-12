@@ -255,7 +255,7 @@ export function rootHelp(version: string): string {
     `dev-services-dashboard CLI v${version} (dsd)`,
     "",
     "Controls a Dev Services Dashboard that is ALREADY RUNNING. It does not start",
-    "the dashboard itself — boot that however you normally do, then point this at it.",
+    "the dashboard itself. Boot that however you normally do, then point this at it.",
     "",
     "Usage: dsd <command> [options]",
     "",
@@ -272,7 +272,7 @@ export function rootHelp(version: string): string {
     "  Discover the whole surface as JSON:  dsd help --json",
     "  Every command maps to an HTTP route, so plain curl works too:",
     "    curl localhost:4000/api/v1/services",
-    "  No authentication — it trusts anything that can reach the port, same as the web UI.",
+    "  No authentication: it trusts anything that can reach the port, same as the web UI.",
     "",
     `Dashboard URL: --url, then $DEV_SERVICES_DASHBOARD_URL, then $DSD_URL, else ${DEFAULT_URL}`,
   ].join("\n");

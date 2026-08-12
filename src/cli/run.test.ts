@@ -31,7 +31,7 @@ mock.module("child_process", () => ({
 import { startDevServicesDashboard } from "../backend/index";
 import type { DevUIServer } from "../backend/types";
 import { run, resolveTimeoutForTest, type CliIO } from "./run";
-import { EXIT } from "./exit-codes";
+import { EXIT, finalExitCode } from "./exit-codes";
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -292,6 +292,115 @@ describe("CLI", () => {
     it("clears logs", async () => {
       await cli("start", "api");
       expect((await cli("clear-logs", "api")).code).toBe(EXIT.OK);
+    });
+  });
+
+  describe("interrupts", () => {
+    /** Runs a command whose interrupt signal is already aborted (Ctrl+C). */
+    async function interrupted(...args: string[]) {
+      const controller = new AbortController();
+      controller.abort();
+
+      let stdout = "";
+      let stderr = "";
+      const code = await run(["--url", url, ...args], {
+        stdout: (t) => {
+          stdout += t;
+        },
+        stderr: (t) => {
+          stderr += t;
+        },
+        env: { NO_COLOR: "1" },
+        isTTY: false,
+        version: "9.9.9-test",
+        signal: controller.signal,
+      });
+      return { code, stdout, stderr };
+    }
+
+    it("exits 130 when a command is cut short, not 5", async () => {
+      // The distinction is the point: 5 means "no dashboard there", which is a
+      // very different thing for a retrying script than "you pressed Ctrl+C".
+      const { code, stdout } = await interrupted("start", "api");
+      expect(code).toBe(EXIT.INTERRUPTED);
+      expect(code).not.toBe(EXIT.UNREACHABLE);
+      expect(stdout).toBe("");
+    });
+
+    it("reports an interrupt distinctly under --json", async () => {
+      const { code, stderr } = await interrupted("status", "--json");
+      expect(code).toBe(EXIT.INTERRUPTED);
+
+      const parsed = JSON.parse(stderr);
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error.code).toBe("interrupted");
+      // The envelope's exitCode must agree with what the process actually
+      // returns, or a script branching on the JSON disagrees with `$?`.
+      expect(parsed.exitCode).toBe(EXIT.INTERRUPTED);
+    });
+
+    it("interrupts a request that is already in flight", async () => {
+      // The case the fix actually exists for: Ctrl+C partway through a blocking
+      // command, not before it started. A server that accepts the connection
+      // and never answers stands in for a slow `stop`, so the abort has to
+      // reach the pending fetch rather than the pre-flight guard.
+      const silent = createServer();
+      silent.on("connection", () => {}); // accept, then never respond
+      const port = await new Promise<number>((resolve) => {
+        silent.listen(0, "127.0.0.1", () => {
+          resolve((silent.address() as { port: number }).port);
+        });
+      });
+
+      try {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 100);
+
+        let stderr = "";
+        const code = await run(
+          ["--url", `http://127.0.0.1:${port}`, "stop", "api"],
+          {
+            stdout: () => {},
+            stderr: (t) => {
+              stderr += t;
+            },
+            env: { NO_COLOR: "1" },
+            isTTY: false,
+            version: "9.9.9-test",
+            signal: controller.signal,
+          },
+        );
+
+        // Not UNREACHABLE: the dashboard answered the connection fine, and not
+        // a timeout either, since `stop` carries no client deadline.
+        expect(code).toBe(EXIT.INTERRUPTED);
+        expect(stderr).toContain("Interrupted");
+        expect(stderr).not.toContain("Timed out");
+      } finally {
+        await new Promise((r) => silent.close(() => r(null)));
+      }
+    });
+
+    it("documents 130 in the help table", async () => {
+      const { stdout } = await cli("--help");
+      expect(stdout).toContain("130 interrupted before completing");
+    });
+
+    describe("finalExitCode", () => {
+      it("keeps a completed command's own code despite a signal", () => {
+        // `logs --follow` ending on Ctrl+C is a success, not a 130.
+        expect(finalExitCode(EXIT.OK, 130)).toBe(EXIT.OK);
+      });
+
+      it("reports the signal's code when the command did not complete", () => {
+        expect(finalExitCode(EXIT.UNREACHABLE, 130)).toBe(130);
+        expect(finalExitCode(EXIT.INTERRUPTED, 143)).toBe(143);
+      });
+
+      it("passes the command's code straight through with no signal", () => {
+        expect(finalExitCode(EXIT.OK)).toBe(EXIT.OK);
+        expect(finalExitCode(EXIT.FAILED)).toBe(EXIT.FAILED);
+      });
     });
   });
 

@@ -4,7 +4,7 @@
  * These are the CLI's real contract with a script or an AI agent driving it:
  * the human-readable output may be reworded at any time, but a caller can
  * branch on these. They're deliberately fine-grained where the right reaction
- * differs — "you typed a service name that doesn't exist" (4), "the dashboard
+ * differs: "you typed a service name that doesn't exist" (4), "the dashboard
  * isn't running" (5), and "it's mid-shutdown, try again shortly" (6) all mean
  * very different things to whoever is retrying.
  */
@@ -31,9 +31,36 @@ export const EXIT = {
   SIGNAL_NOT_ALLOWED: 7,
   /** The dashboard answered with something this CLI didn't expect. */
   UNEXPECTED: 8,
+  /**
+   * The command was cut short by Ctrl+C before it finished, so its outcome is
+   * unknown (the dashboard may well have carried on). 130 rather than a number
+   * in the sequence above: it's the conventional 128 + SIGINT, which is what a
+   * shell reports for an interrupted process anyway.
+   *
+   * Note `logs --follow` does NOT use this. Ctrl+C is how you end a follow, so
+   * that finishing normally is a success and still exits 0.
+   */
+  INTERRUPTED: 130,
 } as const;
 
 export type ExitCode = (typeof EXIT)[keyof typeof EXIT];
+
+/**
+ * The process's exit code, given what `run()` returned and the code of a signal
+ * that arrived before it finished (if one did).
+ *
+ * A command that still finished its job keeps its own code even though a signal
+ * arrived: Ctrl+C is the documented way to end `logs --follow`, so that is a
+ * success, not a 130. Only a command that did NOT complete reports the signal's
+ * conventional code.
+ *
+ * A pure function rather than an inline expression in `bin.ts` because it is the
+ * whole of a documented contract (see the exit-code table in the README) and
+ * `bin.ts` is otherwise untestable without spawning a process.
+ */
+export function finalExitCode(code: number, signalExitCode?: number): number {
+  return code === EXIT.OK ? code : (signalExitCode ?? code);
+}
 
 /** One-line descriptions, shown in `--help` so the table is self-documenting. */
 export const EXIT_DESCRIPTIONS: [number, string][] = [
@@ -46,4 +73,5 @@ export const EXIT_DESCRIPTIONS: [number, string][] = [
   [EXIT.SHUTTING_DOWN, "dashboard shutting down"],
   [EXIT.SIGNAL_NOT_ALLOWED, "signal not allowed"],
   [EXIT.UNEXPECTED, "unexpected API response"],
+  [EXIT.INTERRUPTED, "interrupted before completing"],
 ];

@@ -3,7 +3,7 @@
  *
  * Both sides import it as `@shared/protocol` (a tsconfig `paths` alias, plus a
  * Vite resolve alias for the frontend). It is intentionally dependency-free (no
- * Node or DOM types) so both toolchains can include it — the backend's imports
+ * Node or DOM types) so both toolchains can include it. The backend's imports
  * are type-only, so they erase at runtime and tsup just inlines the types into
  * the published `.d.ts`. It holds only the types that cross the HTTP/WebSocket
  * boundary; runtime-only types (e.g. `Service`, which holds a `ChildProcess`)

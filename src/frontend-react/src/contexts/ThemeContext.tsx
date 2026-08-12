@@ -31,7 +31,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     );
   });
 
-  // The actual theme value is derived from mode + system theme — no separate
+  // The actual theme value is derived from mode + system theme, so no separate
   // state needed (deriving avoids a setState-in-effect cascade).
   const theme: ThemeValue = mode === "auto" ? systemTheme : mode;
 

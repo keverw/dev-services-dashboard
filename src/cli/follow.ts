@@ -28,7 +28,7 @@ export interface FollowOptions {
  * This is the one place the CLI speaks WebSocket rather than the HTTP control
  * API: the dashboard already broadcasts every log line to connected clients, so
  * following is just a matter of listening. The opening `initial_state` frame
- * carries each service's buffered logs, which doubles as the initial tail — so
+ * carries each service's buffered logs, which doubles as the initial tail, so
  * a follow needs no HTTP call at all.
  *
  * `ws` is used rather than a global `WebSocket` because the package supports
@@ -62,7 +62,7 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
       try {
         socket.close();
       } catch {
-        // Already closing or never opened — nothing to do.
+        // Already closing or never opened, so nothing to do.
       }
       resolve(code);
     };
@@ -83,7 +83,7 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
           err instanceof Error ? err.message : String(err)
         })\n`,
       );
-      // There's no socket to close, so this can't go through `finish` — but the
+      // There's no socket to close, so this can't go through `finish`, but the
       // abort listener still has to come off, like on every other exit path.
       settled = true;
       signal?.removeEventListener("abort", onAbort);
@@ -120,7 +120,7 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
 
     socket.on("close", () => {
       // The dashboard went away (it stopped, or the connection dropped). Report
-      // it distinctly rather than exiting 0 as though following ended cleanly —
+      // it distinctly rather than exiting 0 as though following ended cleanly:
       // a caller tailing logs wants to know the source disappeared.
       if (settled) return;
       stderr("dsd: connection to the dashboard closed.\n");

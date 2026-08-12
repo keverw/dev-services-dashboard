@@ -154,7 +154,7 @@ function ServiceTab({
             className={isStopping ? "stop-button force-stop" : "stop-button"}
             title={
               isStopping
-                ? `Force stop ${service.name} — SIGKILL now, without waiting out the grace period`
+                ? `Force stop ${service.name}: SIGKILL now, without waiting out the grace period`
                 : `Stop ${service.name}`
             }
             onClick={() => onStop(isStopping)}

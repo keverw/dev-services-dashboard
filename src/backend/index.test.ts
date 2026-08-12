@@ -211,7 +211,7 @@ describe("Dev Services Dashboard", () => {
         ws.onopen = resolve;
       });
 
-      // clear_logs triggers a `logs_cleared` broadcast to every open client —
+      // clear_logs triggers a `logs_cleared` broadcast to every open client,
       // exercising the broadcast fan-out (not the direct initial_state send).
       const cleared = await new Promise((resolve, reject) => {
         ws.onmessage = (event) => {
@@ -318,7 +318,7 @@ describe("Dev Services Dashboard", () => {
 
       ws.send(JSON.stringify({ action: "stop_all" }));
 
-      // No services are running, so stop_all should complete silently — assert
+      // No services are running, so stop_all should complete silently. Assert
       // we don't get an error_from_server back.
       const sawError = await new Promise((resolve) => {
         ws.onmessage = (event) => {

@@ -2,7 +2,7 @@ import type { LogEntry, ServiceStatusValue } from "@shared/protocol";
 import type { ServiceSummary } from "@shared/control-api";
 
 /**
- * ANSI codes written out rather than pulled from a package — the dashboard ships
+ * ANSI codes written out rather than pulled from a package: the dashboard ships
  * with two runtime dependencies and adding a color library for eight escape
  * codes isn't a trade worth making.
  */
@@ -25,7 +25,7 @@ export const withColor: Colorize = (text, code) =>
 
 /**
  * Whether to emit color. Unlike the output *format* (which never changes
- * implicitly — see `run.ts`), color genuinely should follow the stream: nobody
+ * implicitly, see `run.ts`), color genuinely should follow the stream: nobody
  * wants escape codes in a piped file, and `NO_COLOR` is a broadly honored
  * convention.
  */
@@ -56,16 +56,36 @@ function statusColor(status: ServiceStatusValue): keyof typeof ANSI {
   }
 }
 
+// Matches an SGR color sequence, the only kind this file emits.
+// eslint-disable-next-line no-control-regex
+const ANSI_SGR = /\x1b\[[0-9;]*m/g;
+
+/**
+ * A cell's width as the terminal draws it. Cells are colorized before they get
+ * here, and an escape sequence occupies no columns, so measuring with
+ * `String.length` would count it and misalign the row: the green `running` code
+ * is one byte longer than the dim `stopped` one, which is enough to shift every
+ * column after STATUS by a character.
+ */
+function visibleWidth(cell: string): number {
+  return cell.replace(ANSI_SGR, "").length;
+}
+
 /** Renders rows as a left-aligned, space-padded table. */
 export function table(headers: string[], rows: string[][]): string {
   const widths = headers.map((header, i) =>
-    Math.max(header.length, ...rows.map((row) => (row[i] ?? "").length)),
+    Math.max(
+      visibleWidth(header),
+      ...rows.map((row) => visibleWidth(row[i] ?? "")),
+    ),
   );
 
   const render = (cells: string[]) =>
     cells
       .map((cell, i) =>
-        i === cells.length - 1 ? cell : cell.padEnd(widths[i]),
+        i === cells.length - 1
+          ? cell
+          : cell + " ".repeat(Math.max(0, widths[i] - visibleWidth(cell))),
       )
       .join("  ")
       .trimEnd();

@@ -1,5 +1,5 @@
 // Frontend-local view types. Wire types (the WebSocket message contract, web
-// links, signals, statuses) come from the shared protocol — import them from
+// links, signals, statuses) come from the shared protocol. Import them from
 // "@shared/protocol" directly where needed. This app is bundled and embedded
 // into the backend package rather than imported as a module, so there's no
 // public type surface to re-export here (unlike the backend's types.ts).

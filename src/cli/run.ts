@@ -39,7 +39,8 @@ export interface CliIO {
   isTTY: boolean;
   version: string;
   /**
-   * Stops a long-running command (today, `logs --follow`). `bin.ts` wires this
+   * Stops a long-running command: `logs --follow`, and any in-flight HTTP
+   * request (the lifecycle commands can block for minutes). `bin.ts` wires this
    * to SIGINT; tests use it to end a follow deterministically.
    */
   signal?: AbortSignal;
@@ -51,7 +52,7 @@ export interface CliIO {
  *
  * `stop` belongs here as much as the start-like ones: a stop sends SIGTERM and
  * then waits out the service's `stopTimeout` before escalating to SIGKILL, and
- * that timeout is configurable per service — so any value above the default
+ * that timeout is configurable per service, so any value above the default
  * client deadline would abort the request and report a failure while the
  * server's stop was still legitimately in progress.
  */
@@ -63,6 +64,13 @@ const SLOW_COMMANDS = new Set([
   "stop-all",
 ]);
 const DEFAULT_TIMEOUT_MS = 15_000;
+/**
+ * Upper bound on `--grace`, mirroring the server's. Redeclared rather than
+ * imported from the backend: the CLI bundle deliberately pulls in nothing from
+ * `src/backend` (see `tsup.config.ts`), so importing it would drag the server
+ * in behind it.
+ */
+const MAX_GRACE_MS = 2_147_483_647;
 /** Buffered lines replayed before `logs --follow` switches to live output. */
 const DEFAULT_FOLLOW_LINES = 10;
 
@@ -70,7 +78,7 @@ const DEFAULT_FOLLOW_LINES = 10;
  * The whole CLI, as a function.
  *
  * `bin.ts` is only a shebang plus `process.exit(await run(...))`. Keeping the
- * logic here — with output and environment injected — means the tests can drive
+ * logic here, with output and environment injected, means the tests can drive
  * real commands against a real dashboard and assert on exit codes and captured
  * stdout, without spawning a child process.
  */
@@ -92,7 +100,7 @@ export async function run(argv: string[], io: CliIO): Promise<number> {
 
 async function dispatch(argv: string[], io: CliIO): Promise<number> {
   // The whole argv is parsed in one pass with a single option spec, so flags
-  // work on either side of the command — `dsd --url X status` and
+  // work on either side of the command: `dsd --url X status` and
   // `dsd status --url X` are both natural to type and both valid.
   const { values, positionals } = parseArgs({
     args: argv,
@@ -180,7 +188,10 @@ async function dispatch(argv: string[], io: CliIO): Promise<number> {
   }
 
   const baseURL = resolveURL(values.url, io.env);
-  const client = new ApiClient({ baseURL, timeoutMs });
+  // The interrupt signal goes to the client too, not just `logs --follow`: the
+  // lifecycle commands run with no deadline, so without it Ctrl+C would leave
+  // the request running and the user pressing it a second time.
+  const client = new ApiClient({ baseURL, timeoutMs, signal: io.signal });
 
   // Drop the command itself, so a handler's `positionals[0]` is its first real
   // argument (a service id for most commands).
@@ -242,7 +253,7 @@ function resolveURL(
 ): string {
   const raw =
     flag ?? env.DEV_SERVICES_DASHBOARD_URL ?? env.DSD_URL ?? DEFAULT_URL;
-  // Tolerate a bare host:port and a trailing slash — both are natural to type.
+  // Tolerate a bare host:port and a trailing slash, both natural to type.
   const withScheme = /^https?:\/\//.test(raw) ? raw : `http://${raw}`;
   return withScheme.replace(/\/+$/, "");
 }
@@ -297,6 +308,11 @@ function reportFailure(ctx: Ctx, result: ApiResult<unknown>): ExitCode {
       code = EXIT.UNEXPECTED;
       message = result.message;
       errorCode = "unexpected_response";
+      break;
+    case "interrupted":
+      code = EXIT.INTERRUPTED;
+      message = result.message;
+      errorCode = "interrupted";
       break;
     case "ok":
       return EXIT.OK;
@@ -360,10 +376,14 @@ function stopTuning(ctx: Ctx): { force: boolean; graceMs?: number } | null {
   const force = ctx.values.force === true;
   if (ctx.values.grace === undefined) return { force };
 
+  // Same bounds the server enforces, checked here so an obvious mistake fails
+  // without a round trip and with a message that states the real constraint.
+  // The ceiling is what setTimeout can represent; above it a delay silently
+  // becomes 1ms, i.e. an immediate kill.
   const graceMs = Number(ctx.values.grace);
-  if (!Number.isInteger(graceMs) || graceMs <= 0) {
+  if (!Number.isInteger(graceMs) || graceMs <= 0 || graceMs > MAX_GRACE_MS) {
     ctx.io.stderr(
-      "dsd: --grace must be a positive integer (ms). Use --force for no grace period.\n",
+      `dsd: --grace must be a positive integer (ms) no greater than ${MAX_GRACE_MS}. Use --force for no grace period.\n`,
     );
     return null;
   }

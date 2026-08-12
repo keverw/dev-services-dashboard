@@ -21,7 +21,7 @@ import type {
  * The public view of a service.
  *
  * Deliberately a subset of the backend's internal `Service`: that object holds a
- * live `ChildProcess` handle (circular — `JSON.stringify` would throw) and the
+ * live `ChildProcess` handle (circular, so `JSON.stringify` would throw) and the
  * resolved `env`, which routinely carries secrets. The control API is
  * unauthenticated, so `env`, `cwd`, and `command` are withheld and every
  * response is built through an explicit mapper rather than by serializing a
@@ -138,7 +138,7 @@ export interface StopAllResponse {
   services: ServiceSummary[];
 }
 
-/** `GET /api/v1` — a self-describing index, so a `curl`-only client can discover the surface. */
+/** `GET /api/v1`: a self-describing index, so a `curl`-only client can discover the surface. */
 export interface ApiIndexResponse {
   ok: true;
   name: string;

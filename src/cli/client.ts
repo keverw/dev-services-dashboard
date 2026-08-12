@@ -12,7 +12,11 @@ export type ApiResult<T> =
   | { kind: "ok"; status: number; data: T }
   | { kind: "api"; status: number; error: ApiError }
   | { kind: "unreachable"; message: string }
-  | { kind: "unexpected"; message: string };
+  | { kind: "unexpected"; message: string }
+  // Its own arm rather than an `unreachable`: the dashboard was fine, the user
+  // pressed Ctrl+C. Reporting it as "couldn't reach the dashboard" would tell a
+  // script exactly the wrong thing.
+  | { kind: "interrupted"; message: string };
 
 /** Maps an API failure code onto the process exit code it should produce. */
 export function exitCodeForApiError(code: ApiErrorCode): ExitCode {
@@ -40,16 +44,26 @@ export function exitCodeForApiError(code: ApiErrorCode): ExitCode {
   }
 }
 
+/** Reported when the user interrupts a request (Ctrl+C) rather than it failing. */
+export const INTERRUPTED = "Interrupted.";
+
 export interface ClientOptions {
   baseURL: string;
   /** Milliseconds before giving up; 0 (the default for start-like commands) waits forever. */
   timeoutMs: number;
+  /**
+   * Cancels an in-flight request. `bin.ts` wires this to Ctrl+C, so a command
+   * with no client deadline (a blocking `start`, or a `stop` waiting out a long
+   * grace period) can still be interrupted on the first press rather than
+   * running to completion with the signal handler swallowing the terminate.
+   */
+  signal?: AbortSignal;
 }
 
 /**
  * Minimal fetch wrapper over the control API.
  *
- * Uses only globals and `node:` builtins on purpose — the CLI must not pull
+ * Uses only globals and `node:` builtins on purpose: the CLI must not pull
  * `ws` or `mime-types` into its bundle, and this package keeps a very small
  * dependency tree.
  */
@@ -75,6 +89,12 @@ export class ApiClient {
   ): Promise<ApiResult<T>> {
     const url = `${this.options.baseURL}/api/v1${path}`;
 
+    // Checked before arming the timer below, so bailing out here can't leave a
+    // pending timeout holding the event loop open.
+    const interrupt = this.options.signal;
+    if (interrupt?.aborted)
+      return { kind: "interrupted", message: INTERRUPTED };
+
     // A blocking start can legitimately take beforeStartTimeout + startTimeout +
     // afterStartTimeout (~130s with the defaults), so start-like commands pass
     // timeoutMs: 0 and wait indefinitely rather than report a false failure.
@@ -84,10 +104,14 @@ export class ApiClient {
         ? setTimeout(() => controller.abort(), this.options.timeoutMs)
         : undefined;
 
+    const onInterrupt = () => controller.abort();
+    interrupt?.addEventListener("abort", onInterrupt);
+
     let response: Response;
+    let text: string;
     try {
       const headers: Record<string, string> = { Accept: "application/json" };
-      // Every mutating request must be application/json — the server requires
+      // Every mutating request must be application/json, since the server requires
       // it as a CSRF guard, and rejects anything else with 415.
       if (method === "POST") headers["Content-Type"] = "application/json";
 
@@ -97,19 +121,27 @@ export class ApiClient {
         body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
         signal: controller.signal,
       });
+
+      // Read the body inside the same try, so the deadline and the interrupt
+      // still apply. `fetch` resolves as soon as the headers arrive, so a
+      // response that stalls mid-body would otherwise hang past --timeout.
+      text = await response.text();
     } catch (err) {
-      const message =
-        err instanceof Error && err.name === "AbortError"
-          ? `Timed out after ${this.options.timeoutMs}ms waiting for ${this.options.baseURL}`
-          : `Could not reach a dashboard at ${this.options.baseURL} (${
-              err instanceof Error ? err.message : String(err)
-            })`;
+      const aborted = err instanceof Error && err.name === "AbortError";
+      if (aborted && interrupt?.aborted) {
+        return { kind: "interrupted", message: INTERRUPTED };
+      }
+      const message = aborted
+        ? `Timed out after ${this.options.timeoutMs}ms waiting for ${this.options.baseURL}`
+        : `Could not reach a dashboard at ${this.options.baseURL} (${
+            err instanceof Error ? err.message : String(err)
+          })`;
       return { kind: "unreachable", message };
     } finally {
       if (timer) clearTimeout(timer);
+      interrupt?.removeEventListener("abort", onInterrupt);
     }
 
-    const text = await response.text();
     let parsed: unknown;
     try {
       parsed = text.length > 0 ? JSON.parse(text) : {};

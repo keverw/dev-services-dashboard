@@ -325,7 +325,7 @@ describe("Control API", () => {
       ).json();
 
       expect(tail.entries).toHaveLength(1);
-      // The tail, not the head — the newest line is what "the last one" means.
+      // The tail, not the head: the newest line is what "the last one" means.
       expect(tail.entries[0]).toEqual(all.entries[all.entries.length - 1]);
     });
 
@@ -438,7 +438,7 @@ describe("Control API", () => {
     const body = await res.json();
     expect(body.dashboardName).toBe("Test Dashboard");
     expect(body.services).toHaveLength(2);
-    // The legacy shape has no status field — the UI gets that over the socket.
+    // The legacy shape has no status field; the UI gets that over the socket.
     expect(body.services[0].status).toBeUndefined();
   });
 });

@@ -25,7 +25,7 @@ export function useWebSocket({
   const isUnmountedRef = useRef(false);
 
   // The socket's event handlers are bound once (on mount), so without this they
-  // would close over the callbacks from the first render forever — meaning
+  // would close over the callbacks from the first render forever, meaning
   // handlers like onClose/onMessage would see stale state (e.g. an empty
   // service list). Mirror the latest callbacks into a ref each render so the
   // handlers always invoke the current versions.

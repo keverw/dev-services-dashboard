@@ -125,7 +125,7 @@ function Header({
             disabled={stopAllDisabled}
             title={
               stopAllInProgress
-                ? "Force stop all services — SIGKILL now, without waiting out their grace periods"
+                ? "Force stop all services: SIGKILL now, without waiting out their grace periods"
                 : "Stop all services"
             }
           >

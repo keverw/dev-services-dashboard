@@ -8,7 +8,7 @@ import { Logger } from "./logger";
  * Why a `sendSignal` call did or didn't deliver. The signal path refuses for
  * several distinct reasons that all used to be indistinguishable to a caller
  * (they were recorded only in the service's log stream), but which the HTTP
- * control API has to tell apart to pick a status code — an undeclared signal is
+ * control API has to tell apart to pick a status code: an undeclared signal is
  * a caller mistake (422) while a stopped service is a state conflict (409).
  */
 export type SendSignalResult =
@@ -22,9 +22,10 @@ export type SendSignalResult =
 /** Outcome of a "Start All" run. `ran: false` means it was declined outright. */
 export interface StartAllSummary {
   /**
-   * False when the run never began — the dashboard is shutting down, or another
-   * Start All is already in flight. Distinguishing this from a run that started
-   * nothing matters: `{started: 0}` alone reads as "everything failed".
+   * False when the run never began, either because the dashboard is shutting
+   * down or because another Start All is already in flight. Distinguishing this
+   * from a run that started nothing matters: `{started: 0}` alone reads as
+   * "everything failed".
    */
   ran: boolean;
   started: number;
@@ -44,9 +45,9 @@ export interface StopAllSummary {
  * Strips ANSI escape sequences from a log line. The UI renders logs as plain
  * text, so any escape sequence is just noise (or, for cursor moves / erases,
  * visible garbage). Covers:
- *   - CSI sequences (`ESC [ … <final byte>`) — this is SGR color/style **and**
+ *   - CSI sequences (`ESC [ … <final byte>`): this is SGR color/style **and**
  *     cursor moves, clear-line / clear-screen, etc. (e.g. progress spinners).
- *   - OSC sequences (`ESC ] … BEL` or `ESC ] … ESC \`) — e.g. window-title sets.
+ *   - OSC sequences (`ESC ] … BEL` or `ESC ] … ESC \`): e.g. window-title sets.
  * Requiring the leading ESC (`\x1b`) means we consume whole sequences and never
  * clobber legitimate text that merely looks like a code (e.g. "arr[0m]").
  * Exported for testing.
@@ -54,7 +55,7 @@ export interface StopAllSummary {
 export function stripAnsi(input: string): string {
   // OSC: ESC ] … terminated by BEL (\x07) or ST (ESC \). CSI: ESC [ then
   // parameter bytes (0x30–0x3F), intermediate bytes (0x20–0x2F), and a final
-  // byte (0x40–0x7E) — which covers SGR (`m`) along with cursor/erase codes.
+  // byte (0x40–0x7E), which covers SGR (`m`) along with cursor/erase codes.
   return input.replace(
     // eslint-disable-next-line no-control-regex
     /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]/g,
@@ -120,9 +121,26 @@ export function positiveOr(
 }
 
 /**
+ * The largest delay `setTimeout` can hold, since it stores the delay in a
+ * 32-bit signed integer. Anything above this is silently clamped to 1ms by
+ * Node (with a TimeoutOverflowWarning), which would turn "wait a very long
+ * time" into "fire on the next tick", the exact opposite of what was asked.
+ */
+export const MAX_TIMER_MS = 2_147_483_647;
+
+/**
+ * Caps a timer delay at what `setTimeout` can actually represent. Used on the
+ * stop grace period, whose value can come from a caller (a `graceMs` override
+ * over HTTP or the WebSocket) rather than only from the dashboard's own config.
+ */
+export function clampTimerMs(ms: number): number {
+  return Math.min(ms, MAX_TIMER_MS);
+}
+
+/**
  * String-option guard mirroring `positiveOr` for string options (e.g.
  * `hostname`). Returns the trimmed value when it's a non-empty string,
- * otherwise the `fallback` — so a non-string, empty, or whitespace-only value
+ * otherwise the `fallback`, so a non-string, empty, or whitespace-only value
  * falls back to the default. Trimming also drops stray surrounding whitespace
  * that would otherwise make an address fail to bind. Exported for testing.
  */
@@ -166,24 +184,29 @@ export class ServiceManager {
   // In-flight `startAndWait` runs, keyed by serviceID. A second concurrent
   // start of the same service attaches to the existing run's promise rather
   // than spawning a second waiter+timer (only one waiter can live in
-  // `startWaiters` per service, so two runs would orphan the first's timer —
+  // `startWaiters` per service, so two runs would orphan the first's timer,
   // which could later fire `failStartOnTimeout` against an already-`running`
   // service and wrongly tear it down).
   private inFlightStarts = new Map<string, Promise<boolean>>();
   // In-flight `stopService` runs, keyed by serviceID. Held so a *forced* stop
   // arriving while a graceful one is still waiting out its `stopTimeout` can
   // escalate that run to SIGKILL immediately and share its promise, instead of
-  // starting a second stop — which would detach the first run's `exit` listener
+  // starting a second stop, which would detach the first run's `exit` listener
   // and leave its caller awaiting a promise that never settles.
   private inFlightStops = new Map<
     string,
-    { promise: Promise<void>; escalate: () => void }
+    {
+      promise: Promise<void>;
+      escalate: () => void;
+      /** Re-arms the grace period of a stop already under way (see `graceMs`). */
+      retime: (graceMs: number) => void;
+    }
   >();
   private startAllInProgress = false;
   // Latched true when the dashboard server begins shutting down (DevUIServer
   // stop()). Once set, every start path refuses, so neither a late client
   // action nor an in-flight `startAndWait` waiter can resurrect a service after
-  // shutdown has already stopped it — a resurrected process would leak, since
+  // shutdown has already stopped it. A resurrected process would leak, since
   // the closing server no longer manages it. Stop paths are unaffected (the
   // shutdown itself drives them through stopService/stopAllServices).
   //
@@ -246,12 +269,12 @@ export class ServiceManager {
    * Topologically sorts `this.services` based on the `dependsOn` graph so that
    * dependencies appear before the services that depend on them. Unknown
    * dependency IDs are dropped with a warning. Self-dependencies and dependency
-   * cycles are unresolvable misconfigurations and throw — the dashboard refuses
+   * cycles are unresolvable misconfigurations and throw: the dashboard refuses
    * to start rather than run in a misleading order.
    */
   private computeStartOrder(): void {
     // Validate the basic config up front. IDs must be unique (they key every
-    // lookup, `dependsOn` reference, and the per-service UI — a duplicate would
+    // lookup, `dependsOn` reference, and the per-service UI, so a duplicate would
     // silently shadow the earlier service), and each `command` must be a
     // non-empty string array whose first element (the executable) is a
     // non-empty string. We reject these here rather than fail obscurely later.
@@ -369,7 +392,7 @@ export class ServiceManager {
     const service = this.getService(serviceID);
     if (!service) return;
 
-    // Strip ANSI escape sequences — the UI renders logs as plain text, so
+    // Strip ANSI escape sequences: the UI renders logs as plain text, so
     // they'd just be noise (see stripAnsi for what's covered).
     const line = stripAnsi(originalLine);
 
@@ -396,13 +419,13 @@ export class ServiceManager {
    * when the service is no longer up, and notifies any `startAndWait` waiter.
    *
    * Every status change goes through here, so callers never assign
-   * `service.status` themselves — they call `setStatus`.
+   * `service.status` themselves. They call `setStatus`.
    *
    * The waiter is notified **asynchronously** (on a microtask), never inline.
    * This is load-bearing: a waiter reacts to `stopped` by starting a fresh
    * process, and if that ran synchronously it would execute in the middle of
-   * the emitter's own work — e.g. an exit handler that still has to null the
-   * process handle and reap the old process group — corrupting it (a clobbered
+   * the emitter's own work (e.g. an exit handler that still has to null the
+   * process handle and reap the old process group), corrupting it (a clobbered
    * handle, a port race). Deferring guarantees the emitter finishes its
    * synchronous teardown before any waiter runs, so no emitter has to order its
    * cleanup around re-entrant restarts.
@@ -426,7 +449,7 @@ export class ServiceManager {
 
     // Once a service is no longer up, drop any links its hooks computed for the
     // run (a tunnel URL, a dynamically-chosen port) and revert the card to the
-    // configured baseline — a dead service shouldn't show a stale dynamic link.
+    // configured baseline: a dead service shouldn't show a stale dynamic link.
     // No-op (and no broadcast) when it had no live links to begin with.
     if (
       service &&
@@ -503,8 +526,8 @@ export class ServiceManager {
       try {
         const result = await service.beforeStart({
           env: mergedEnv,
-          // Always the configured baseline (a copy), so the hook can't see —
-          // and accumulate on top of — links it added on a previous run.
+          // Always the configured baseline (a copy), so the hook can't see
+          // (and accumulate on top of) links it added on a previous run.
           webLinks: [...(service.webLinks ?? [])],
           log: (line: string) => this.addLog(serviceID, line, "system"),
           signal: controller.signal,
@@ -566,7 +589,7 @@ export class ServiceManager {
         );
 
         // If the service was stopped during the brief `starting` window (after
-        // spawn() returned but before this event fired — e.g. Stop All targets a
+        // spawn() returned but before this event fired (e.g. Stop All targets a
         // `starting` service), the stop path now owns it: it has set `stopping`
         // and is tearing the process down. Don't promote it to `running` (or
         // kick off afterStart against a process being SIGTERM'd) out from under
@@ -737,7 +760,7 @@ export class ServiceManager {
       });
 
       // The hook was aborted (the user stopped the service, or the process
-      // exited under it) — something else already set the terminal status, so
+      // exited under it): something else already set the terminal status, so
       // don't promote to running or apply links. (The status check below also
       // covers the process-exit case; this also covers an abort the hook
       // swallowed without its status having changed yet.)
@@ -750,7 +773,7 @@ export class ServiceManager {
 
       // If the process exited on its own while the hook ran (a crash or clean
       // exit), the exit handler has already set a terminal status and reverted
-      // the links — don't apply the hook's results or promote to running, or a
+      // the links: don't apply the hook's results or promote to running, or a
       // dead service would show stale dynamic links.
       if (service.status !== "finalizing") return;
 
@@ -768,15 +791,15 @@ export class ServiceManager {
     } catch (err) {
       // If a newer start has replaced our controller, this run is stale (the
       // service was stopped/restarted while a signal-ignoring hook kept
-      // running) — it must not touch the service the current run now owns.
+      // running): it must not touch the service the current run now owns.
       // Capture before clearOwnController, which would drop our own entry.
       const superseded = this.abortControllers.get(serviceID) !== controller;
       clearOwnController();
 
-      // A stop-driven abort is an intentional stop, not a failure, so bail —
+      // A stop-driven abort is an intentional stop, not a failure, so bail;
       // stopService already set the status. An exit-driven abort (the process
       // died under the hook) is NOT a clean stop: fall through so a thrown hook
-      // still settles the service on `error` — but only while we're still the
+      // still settles the service on `error`, but only while we're still the
       // current run.
       if (
         superseded ||
@@ -792,7 +815,7 @@ export class ServiceManager {
       );
       this.addLog(serviceID, `Post-start hook failed: ${message}`, "system");
       if (service.process) {
-        // The process is live and holding ports — tear it (and its group) down,
+        // The process is live and holding ports, so tear it (and its group) down,
         // then settle on `error`. stopService reuses the full kill machinery and
         // applies the final status we ask for once the process has exited.
         await this.stopService(serviceID, {
@@ -813,12 +836,12 @@ export class ServiceManager {
    * Sends a POSIX signal to a running service process. The signal must both be
    * declared in the service's `signals[]` config AND be a known signal name
    * (validated against `os.constants.signals`). A signal the service didn't
-   * declare is refused even if it's otherwise valid — `signals[]` is the
+   * declare is refused even if it's otherwise valid: `signals[]` is the
    * allow-list, so a raw WebSocket client can't send arbitrary signals the
    * config never opted into. No-op if the service is not currently running.
    *
    * Unlike stop (which signals the whole process group), this targets ONLY the
-   * launched command's main process — by design. Custom signals like `SIGHUP`
+   * launched command's main process, by design. Custom signals like `SIGHUP`
    * (reload config) are meant for the process you configured, not blasted at
    * every child it forked. Note the consequence: if your `command` is a wrapper
    * that does not forward signals (e.g. `bun run …`, `vite`, `nodemon`), the
@@ -897,7 +920,7 @@ export class ServiceManager {
   /**
    * Sends a termination signal to a service's process. On POSIX the process was
    * spawned detached (its own process group), so `targetGroup` signals the
-   * whole group via a negative PID — reaching children the process forked (e.g.
+   * whole group via a negative PID, reaching children the process forked (e.g.
    * a `bun run` / `vite` wrapper) that would otherwise be orphaned and keep
    * ports held. With `targetGroup` false (graceful stop), only the main process
    * is signaled, letting it coordinate its own children. Falls back to
@@ -917,7 +940,7 @@ export class ServiceManager {
         process.kill(-proc.pid, signal);
         return;
       } catch {
-        // Group already gone or signal not permitted — fall back below.
+        // Group already gone or signal not permitted, so fall back below.
       }
     }
 
@@ -939,7 +962,7 @@ export class ServiceManager {
    * Runs `ps` asynchronously so it never blocks the event loop; resolves once
    * the walk + kills are done (or is skipped on Windows / if `ps` is missing).
    *
-   * This is a single pass — no retry. SIGKILL is uncatchable, so anything the
+   * This is a single pass, with no retry. SIGKILL is uncatchable, so anything the
    * walk finds will die; re-walking would only chase a vanishingly rare process
    * spawned in the window between the snapshot and the kills (and an in-group
    * one would be caught by the group SIGKILL anyway). If `ps` fails, the group
@@ -963,7 +986,7 @@ export class ServiceManager {
           stdio: ["ignore", "pipe", "ignore"],
         });
       } catch {
-        finish(); // ps unavailable — group kill was our best effort
+        finish(); // ps unavailable, group kill was our best effort
         return;
       }
 
@@ -1017,7 +1040,7 @@ export class ServiceManager {
    * `stopTimeout` grace period, the process group is SIGKILLed immediately
    * (after the same escaped-descendant sweep the timeout path does). It is also
    * accepted while a service is already `stopping`, where it cuts short the
-   * grace period of the stop already in flight — that wedged case is the main
+   * grace period of the stop already in flight. That wedged case is the main
    * reason to reach for it.
    *
    * `opts.graceMs` overrides how long this one stop waits before escalating,
@@ -1040,11 +1063,18 @@ export class ServiceManager {
     const service = this.getService(serviceID);
     if (!service) return;
 
-    // Escalate an in-flight graceful stop rather than starting a second one.
-    if (opts.force && service.status === "stopping") {
+    // Retune an in-flight graceful stop rather than starting a second one:
+    // `force` escalates it to SIGKILL now, and a `graceMs` override re-arms its
+    // grace period (usually to cut the remaining wait short). Either way the
+    // original caller's promise is the one returned, so it still settles once.
+    if (
+      service.status === "stopping" &&
+      (opts.force || opts.graceMs !== undefined)
+    ) {
       const inFlight = this.inFlightStops.get(serviceID);
       if (inFlight) {
-        inFlight.escalate();
+        if (opts.force) inFlight.escalate();
+        else inFlight.retime(opts.graceMs!);
         return inFlight.promise;
       }
     }
@@ -1057,7 +1087,7 @@ export class ServiceManager {
     }
 
     // If the service is still running its pre-start hook, abort it and treat
-    // this as a clean stop — no process has been spawned yet.
+    // this as a clean stop: no process has been spawned yet.
     if (service.status === "initializing") {
       const controller = this.abortControllers.get(serviceID);
       controller?.abort();
@@ -1099,8 +1129,9 @@ export class ServiceManager {
     );
 
     // Assigned by the promise executor (which runs synchronously) so the
-    // in-flight entry registered just below can expose it.
+    // in-flight entry registered just below can expose them.
     let escalateStop: () => void = () => {};
+    let retimeStop: (graceMs: number) => void = () => {};
 
     const run = new Promise<void>((resolve) => {
       if (!service.process) {
@@ -1134,7 +1165,7 @@ export class ServiceManager {
         // Tear down fully (drop the handle, reap the old group) before the
         // transition so the broadcast reflects a fully-dead service. Waiter
         // notification is async (see setStatus), so a mid-stop start can't run
-        // until this handler returns — the ordering here is just for a clean
+        // until this handler returns. The ordering here is just for a clean
         // snapshot, no longer load-bearing against re-entrant restarts.
         service.process = null;
         clearTimeout(timeout);
@@ -1156,7 +1187,7 @@ export class ServiceManager {
           try {
             process.kill(-leaderPid, "SIGKILL");
           } catch {
-            // Group already empty — nothing left to reap.
+            // Group already empty, nothing left to reap.
           }
         }
 
@@ -1184,7 +1215,7 @@ export class ServiceManager {
           this.logger.warn(`Force-stopping ${service.name} with SIGKILL.`);
           this.addLog(
             serviceID,
-            `Force stop requested — sending SIGKILL to ${service.name}.`,
+            `Force stop requested: sending SIGKILL to ${service.name}.`,
             "system",
           );
         } else {
@@ -1206,10 +1237,42 @@ export class ServiceManager {
         });
       };
 
+      /**
+       * (Re-)arms the grace period, measured from now. `clampTimerMs` keeps a
+       * huge `graceMs` from overflowing setTimeout's 32-bit delay, which Node
+       * would silently turn into a 1ms wait, i.e. an immediate SIGKILL.
+       */
+      const armGrace = (graceMs: number | undefined) => {
+        if (timeout) clearTimeout(timeout);
+        timeout = setTimeout(
+          () => escalate("timeout"),
+          // `positiveOr` so a per-service `stopTimeout` of 0 (or negative) falls
+          // back to the global default rather than meaning "SIGKILL immediately".
+          // A per-request `graceMs` takes precedence over both, and is guarded
+          // the same way, so a bad override can't collapse the grace period.
+          clampTimerMs(
+            positiveOr(
+              graceMs,
+              positiveOr(service.stopTimeout, this.defaultStopTimeout),
+            ),
+          ),
+        );
+      };
+
       escalateStop = () => escalate("forced");
+      retimeStop = (graceMs: number) => {
+        // Nothing to re-arm once we've already jumped to SIGKILL.
+        if (escalated || !service.process) return;
+        this.addLog(
+          serviceID,
+          `Grace period for ${service.name} reset to ${graceMs}ms.`,
+          "system",
+        );
+        armGrace(graceMs);
+      };
 
       if (opts.force) {
-        // Straight to SIGKILL — no SIGTERM, no grace period, no timer to arm.
+        // Straight to SIGKILL: no SIGTERM, no grace period, no timer to arm.
         escalate("forced");
         return;
       }
@@ -1218,20 +1281,14 @@ export class ServiceManager {
       // its own children. Otherwise signal the whole process group.
       this.stopSignal(service, "SIGTERM", !service.gracefulShutdown);
 
-      timeout = setTimeout(
-        () => escalate("timeout"),
-        // `positiveOr` so a per-service `stopTimeout` of 0 (or negative) falls
-        // back to the global default rather than meaning "SIGKILL immediately".
-        // A per-request `graceMs` takes precedence over both, and is guarded the
-        // same way, so a bad override can't collapse the grace period to 0ms.
-        positiveOr(
-          opts.graceMs,
-          positiveOr(service.stopTimeout, this.defaultStopTimeout),
-        ),
-      );
+      armGrace(opts.graceMs);
     });
 
-    this.inFlightStops.set(serviceID, { promise: run, escalate: escalateStop });
+    this.inFlightStops.set(serviceID, {
+      promise: run,
+      escalate: escalateStop,
+      retime: retimeStop,
+    });
     void run.finally(() => {
       if (this.inFlightStops.get(serviceID)?.promise === run) {
         this.inFlightStops.delete(serviceID);
@@ -1243,7 +1300,7 @@ export class ServiceManager {
 
   /**
    * Stops the service (if anything is up) and starts it again, returning
-   * whether the start half actually reached `running` — so a caller can report
+   * whether the start half actually reached `running`, so a caller can report
    * a truthful outcome rather than assuming a restart succeeded. False also
    * covers the two early returns: a restart refused during shutdown, and an
    * unknown service ID.
@@ -1286,7 +1343,7 @@ export class ServiceManager {
       // Brief settle pause between teardown and respawn: lets the OS finish
       // releasing the old process's resources (e.g. its listening port) so the
       // new process doesn't immediately hit EADDRINUSE on a fast restart. Kept
-      // fixed and not overridable — it guards a real race, and shortening it
+      // fixed and not overridable, since it guards a real race, and shortening it
       // trades a rare hang for a much more annoying flaky start.
       await new Promise((resolve) => setTimeout(resolve, 500));
     } else if (service.status === "initializing") {
@@ -1301,7 +1358,7 @@ export class ServiceManager {
     // The start we just aborted may still be an in-flight `startAndWait` run
     // (the normal WebSocket start path leaves a promise in `inFlightStarts`,
     // e.g. a service hung in a slow `beforeStart`). That entry is cleared
-    // asynchronously once the run settles, so wait for it here — otherwise the
+    // asynchronously once the run settles, so wait for it here; otherwise the
     // `startAndWait` below would rejoin the just-aborted run and resolve with
     // its (failed) result instead of beginning a fresh start.
     const pending = this.inFlightStarts.get(serviceID);
@@ -1326,7 +1383,7 @@ export class ServiceManager {
    * Stops every live service in reverse start order.
    *
    * `opts` is passed through to each individual stop, so a "Force Stop All"
-   * escalates the whole run — including services already `stopping` from the
+   * escalates the whole run, including services already `stopping` from the
    * graceful run it's escalating, which is the point: a wedged stack otherwise
    * makes you wait out every service's grace period in turn.
    */
@@ -1336,10 +1393,13 @@ export class ServiceManager {
     // Stop sequentially in reverse start order so dependents shut down before
     // the dependencies they rely on.
     //
-    // A forced run also picks up services already `stopping`. They're skipped
-    // normally (a stop is already under way, so there'd be nothing to do), but
-    // those are exactly the ones a "Force Stop All" is aimed at — the run it is
-    // escalating left them waiting out their grace periods.
+    // A run carrying tuning also picks up services already `stopping`. They're
+    // skipped normally (a stop is already under way, so there'd be nothing to
+    // do), but those are exactly the ones a "Force Stop All" is aimed at: the
+    // run it is escalating left them waiting out their grace periods. A
+    // `graceMs` override reaches them the same way, re-arming the in-flight
+    // stop rather than leaving the caller's shorter deadline on the floor.
+    const retunes = opts.force || opts.graceMs !== undefined;
     const toStop = [...this.services]
       .reverse()
       .filter(
@@ -1349,7 +1409,7 @@ export class ServiceManager {
             (s.status === "running" ||
               s.status === "starting" ||
               s.status === "finalizing" ||
-              (opts.force && s.status === "stopping"))),
+              (retunes && s.status === "stopping"))),
       );
 
     const total = toStop.length;
@@ -1424,7 +1484,7 @@ export class ServiceManager {
    * Turns a "Start All" wait window elapsing (`startTimeout` /
    * `beforeStartTimeout` / `afterStartTimeout`) into a hard deadline: aborts a
    * running hook, tears down any live process, and puts the service into
-   * `error` — so a hung hook ends the attempt instead of leaving the service
+   * `error`, so a hung hook ends the attempt instead of leaving the service
    * spinning forever. Awaited by `startAndWait` before it resolves false, so the
    * process is actually down (ports freed) before Start All moves on and its
    * dependents are skipped.
@@ -1467,10 +1527,10 @@ export class ServiceManager {
    * driven by status transitions (setStatus → startWaiters), and uses
    * three windows: `beforeStartTimeout` while `initializing`, `startTimeout`
    * while `starting`, `afterStartTimeout` while `finalizing`. A window elapsing
-   * is a hard deadline — see `failStartOnTimeout`.
+   * is a hard deadline (see `failStartOnTimeout`).
    *
-   * This is the timeout-aware start entry used for every user-facing start —
-   * "Start All", a manual single-service start, and restart — so a hung hook
+   * This is the timeout-aware start entry used for every user-facing start
+   * ("Start All", a manual single-service start, and restart), so a hung hook
    * can never leave a service parked in `initializing`/`finalizing` forever.
    * (The raw `startService` primitive it drives has no timeout of its own.)
    *
@@ -1542,7 +1602,7 @@ export class ServiceManager {
       };
 
       // When a start is requested while the service is still `stopping`, we
-      // don't fail it — we wait for the in-flight stop to finish (`stopped`) and
+      // don't fail it: we wait for the in-flight stop to finish (`stopped`) and
       // then start a fresh run, so "start" means "start" even mid-stop. The flag
       // flips off once that start is kicked, after which a later `stopped` is a
       // genuine failed start again.
@@ -1556,7 +1616,7 @@ export class ServiceManager {
         if (status === "running") finish(true);
         else if (status === "stopped") {
           if (awaitingStop) {
-            // The pending stop completed — now actually start it.
+            // The pending stop completed, so now actually start it.
             awaitingStop = false;
             arm(this.startTimeout);
             void this.startService(serviceID);
@@ -1567,7 +1627,7 @@ export class ServiceManager {
         else if (awaitingStop) {
           // Still waiting for the in-flight stop to finish. A duplicate
           // stopService() call re-broadcasts `stopping`; ignore it so the
-          // longer stop-wait deadline armed below stays put — re-arming the
+          // longer stop-wait deadline armed below stays put: re-arming the
           // shorter `startTimeout` here could time the start out before the
           // stop completes, so it would never start.
           return;
@@ -1575,7 +1635,7 @@ export class ServiceManager {
       });
 
       const service = this.getService(serviceID);
-      // Already up — nothing to wait for.
+      // Already up, so nothing to wait for.
       if (service?.status === "running") {
         finish(true);
         return;
@@ -1585,7 +1645,7 @@ export class ServiceManager {
       // stop to finish, then start a fresh run (the waiter above kicks the start
       // on `stopped`). The stop's own SIGKILL fires at `stopTimeout`, so we wait
       // that long plus a further `startTimeout` of grace for the kill to be
-      // reaped before giving up — a genuinely hung stop fails the start rather
+      // reaped before giving up: a genuinely hung stop fails the start rather
       // than parking here forever, while a merely-slow teardown still gets a
       // generous window to complete.
       if (service?.status === "stopping") {
@@ -1599,7 +1659,7 @@ export class ServiceManager {
 
       armForStatus(service?.status ?? "starting");
       // Only (re)start a service that's actually in a startable state. If it's
-      // already in-flight (initializing/starting/finalizing — e.g. started
+      // already in-flight (initializing/starting/finalizing, e.g. started
       // manually moments earlier), startService would refuse and broadcast
       // nothing, so we just attach to its existing run via the waiter above.
       if (
@@ -1663,13 +1723,13 @@ export class ServiceManager {
           progress(service, "skipped", { dependencyName: dep });
           this.addLog(
             service.id,
-            `Skipping ${service.name} — dependency '${dep}' failed.`,
+            `Skipping ${service.name}: dependency '${dep}' failed.`,
             "system",
           );
           continue;
         }
 
-        // Already fully running — count it and move on. Services that are only
+        // Already fully running, so count it and move on. Services that are only
         // on their way up (initializing/starting/finalizing, e.g. started
         // manually moments ago) fall through to startAndWait so we actually wait
         // for them to reach `running` before starting their dependents.
