@@ -158,6 +158,14 @@ export function nonEmptyStringOr(value: unknown, fallback: string): string {
 // service on `error` rather than being treated as an intentional stop.
 const HOOK_ABORT_PROCESS_EXIT = "process-exited";
 
+/**
+ * Whether a stop carries tuning, i.e. it escalates to SIGKILL or overrides the
+ * grace period. Such a stop is aimed at services already `stopping`, so it may
+ * overlap a stop-all already under way instead of joining it.
+ */
+const isTunedStop = (opts: { force?: boolean; graceMs?: number }): boolean =>
+  Boolean(opts.force) || opts.graceMs !== undefined;
+
 export class ServiceManager {
   private services: Service[] = [];
   private maxLogLines: number;
@@ -229,6 +237,11 @@ export class ServiceManager {
     }
   >();
   private startAllInProgress = false;
+  // Every `stopAllServices` run currently walking the stack in reverse start
+  // order (more than one only while a tuned run escalates an ordinary one). An
+  // ordinary call joins these rather than starting a competing sequence. See
+  // `stopAllServices`.
+  private activeStopAlls: Array<Promise<StopAllSummary>> = [];
   // Latched true when the dashboard server begins shutting down (DevUIServer
   // stop()). Once set, every start path refuses, so neither a late client
   // action nor an in-flight `startAndWait` waiter can resurrect a service after
@@ -1514,21 +1527,68 @@ export class ServiceManager {
    * escalates the whole run, including services already `stopping` from the
    * graceful run it's escalating, which is the point: a wedged stack otherwise
    * makes you wait out every service's grace period in turn.
+   *
+   * An ordinary run never overlaps another run of any kind: it joins whatever
+   * is already under way and resolves with that run's summary. Two overlapping
+   * sequences would break the reverse-order guarantee, since the service the
+   * first run is currently awaiting is `stopping` and therefore missing from an
+   * ordinary snapshot, letting the second stop a dependency that dependent
+   * still needs. (Server shutdown during a Force Stop All is exactly this
+   * case.) Tuned runs (force / graceMs) do deliberately overlap: reaching into
+   * a run already under way and escalating it is their whole job.
    */
   async stopAllServices(
     opts: { force?: boolean; graceMs?: number } = {},
   ): Promise<StopAllSummary> {
-    // Stop sequentially in reverse start order so dependents shut down before
-    // the dependencies they rely on.
-    //
-    // A run carrying tuning also picks up services already `stopping`. They're
-    // skipped normally (a stop is already under way, so there'd be nothing to
-    // do), but those are exactly the ones a "Force Stop All" is aimed at: the
-    // run it is escalating left them waiting out their grace periods. A
-    // `graceMs` override reaches them the same way, re-arming the in-flight
-    // stop rather than leaving the caller's shorter deadline on the floor.
-    const retunes = opts.force || opts.graceMs !== undefined;
-    const toStop = [...this.services]
+    const tuned = isTunedStop(opts);
+    if (!tuned) {
+      // Join every run under way, including any that start while we wait (a
+      // Force Stop All can land mid-join), and report the last summary of the
+      // batch as ours.
+      const awaited = new Set<Promise<StopAllSummary>>();
+      let joined: StopAllSummary | undefined;
+      for (;;) {
+        const pending = this.activeStopAlls.filter((r) => !awaited.has(r));
+        if (pending.length === 0) break;
+        for (const run of pending) awaited.add(run);
+        // allSettled, not all: a run that threw is its caller's problem, and
+        // must not turn into a rejection for whoever merely joined it.
+        for (const outcome of await Promise.allSettled(pending)) {
+          if (outcome.status === "fulfilled") joined = outcome.value;
+        }
+      }
+      // Trust the joined run only if it actually left the stack down. Anything
+      // still live (started after that run took its snapshot, or dropped when
+      // it threw) is ours to stop, which matters most on the shutdown path.
+      if (joined && this.servicesToStop(false).length === 0) return joined;
+    }
+
+    const run = this.runStopAll(opts);
+    this.activeStopAlls.push(run);
+    const clear = () => {
+      const at = this.activeStopAlls.indexOf(run);
+      if (at !== -1) this.activeStopAlls.splice(at, 1);
+    };
+    // Settled either way, and never a fresh rejecting promise: `clear` runs on
+    // both paths, so a throwing run can't leave itself listed as active (nor
+    // surface as an unhandled rejection here, the caller still gets `run`).
+    run.then(clear, clear);
+    return run;
+  }
+
+  /**
+   * The live services a stop-all should walk, in reverse start order, so
+   * dependents shut down before the dependencies they rely on.
+   *
+   * A run carrying tuning also picks up services already `stopping`. They're
+   * skipped normally (a stop is already under way, so there'd be nothing to
+   * do), but those are exactly the ones a "Force Stop All" is aimed at: the
+   * run it is escalating left them waiting out their grace periods. A
+   * `graceMs` override reaches them the same way, re-arming the in-flight
+   * stop rather than leaving the caller's shorter deadline on the floor.
+   */
+  private servicesToStop(retunes: boolean): Service[] {
+    return [...this.services]
       .reverse()
       .filter(
         (s) =>
@@ -1539,6 +1599,13 @@ export class ServiceManager {
               s.status === "finalizing" ||
               (retunes && s.status === "stopping"))),
       );
+  }
+
+  private async runStopAll(opts: {
+    force?: boolean;
+    graceMs?: number;
+  }): Promise<StopAllSummary> {
+    const toStop = this.servicesToStop(isTunedStop(opts));
 
     const total = toStop.length;
     let stopped = 0;

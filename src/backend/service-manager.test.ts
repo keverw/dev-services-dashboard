@@ -868,6 +868,86 @@ describe("ServiceManager: stopAllServices", () => {
       failed: 1,
     });
   });
+
+  it("joins a concurrent ordinary run instead of racing its order", async () => {
+    // Two overlapping sequences would break reverse-dependency order: while the
+    // first waits on `b`, that service is `stopping` and so missing from a
+    // second snapshot, which would then stop `a` out from under it.
+    const { sm } = makeManager([svc("b", { dependsOn: ["a"] }), svc("a")], {
+      timeouts: { stopTimeout: 60_000 },
+    });
+    await startAndRun(sm, "a");
+    await startAndRun(sm, "b");
+
+    const bProc = spawnedProcesses[1]!;
+    bProc.exitOnSignals.delete("SIGTERM");
+    killLog.length = 0;
+
+    const first = sm.stopAllServices();
+    await tick();
+    const second = sm.stopAllServices();
+    await tick();
+
+    // `a` is still needed by the not-yet-dead `b`, so nothing has touched it.
+    expect(killLog.map((k) => k.cmd)).toEqual(["b"]);
+
+    bProc.emit("exit", null, "SIGTERM");
+    const [summaryA, summaryB] = await Promise.all([first, second]);
+
+    expect(killLog.map((k) => k.cmd)).toEqual(["b", "a"]);
+    expect(summaryB).toBe(summaryA);
+    expect(summaryA).toEqual({ stopped: 2, failed: 0, total: 2 });
+  });
+
+  it("joins a tuned run already under way", async () => {
+    // Same race with the roles reversed, e.g. server shutdown landing during a
+    // Force Stop All: the ordinary run must not stop `a` while the tuned run is
+    // still waiting on its dependent `b`.
+    const { sm } = makeManager([svc("b", { dependsOn: ["a"] }), svc("a")], {
+      timeouts: { stopTimeout: 60_000 },
+    });
+    await startAndRun(sm, "a");
+    await startAndRun(sm, "b");
+
+    const bProc = spawnedProcesses[1]!;
+    bProc.exitOnSignals.delete("SIGTERM");
+    killLog.length = 0;
+
+    const tuned = sm.stopAllServices({ graceMs: 60_000 });
+    await tick();
+    const ordinary = sm.stopAllServices();
+    await tick();
+
+    expect(killLog.map((k) => k.cmd)).toEqual(["b"]);
+
+    bProc.emit("exit", null, "SIGTERM");
+    const [tunedSummary, ordinarySummary] = await Promise.all([
+      tuned,
+      ordinary,
+    ]);
+
+    expect(killLog.map((k) => k.cmd)).toEqual(["b", "a"]);
+    expect(ordinarySummary).toBe(tunedSummary);
+    expect(tunedSummary).toEqual({ stopped: 2, failed: 0, total: 2 });
+  });
+
+  it("stops what a joined run left behind instead of trusting its summary", async () => {
+    const { sm, broadcasts } = makeManager([svc("a"), svc("b")]);
+    await startAndRun(sm, "a");
+
+    const first = sm.stopAllServices();
+    // `b` comes up after the first run's snapshot, so joining that run is not
+    // enough: the second call still owes the caller (often shutdown) a stop.
+    await startAndRun(sm, "b");
+    broadcasts.length = 0;
+    killLog.length = 0;
+
+    const [, second] = await Promise.all([first, sm.stopAllServices()]);
+
+    expect(second).toEqual({ stopped: 1, failed: 0, total: 1 });
+    expect(killLog.map((k) => k.cmd)).toEqual(["b"]);
+    expect(sm.getService("b")!.status).toBe("stopped");
+  });
 });
 
 describe("ServiceManager: shutdown latch", () => {
