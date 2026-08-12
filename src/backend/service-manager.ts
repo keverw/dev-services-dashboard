@@ -209,7 +209,7 @@ export class ServiceManager {
       retime: (graceMs: number) => void;
       /**
        * When the currently-armed grace period expires, on `performance.now()`'s
-       * monotonic clock, or 0 if none is armed. Read by `remainingStopGraceMs`.
+       * monotonic clock, or 0 if none is armed. Read by `stopGraceEndsAt`.
        */
       graceEndsAt: () => number;
     }
@@ -1289,7 +1289,7 @@ export class ServiceManager {
         );
         // Published so a start that has to wait this stop out can size its own
         // deadline against the grace period actually armed, not the configured
-        // one (see `remainingStopGraceMs`). `performance.now()` rather than
+        // one (see `stopGraceEndsAt`). `performance.now()` rather than
         // `Date.now()` so it measures the same monotonic clock `setTimeout`
         // does: a wall-clock jump (NTP, sleep/wake) would otherwise make the
         // remaining grace disagree with when the timer actually fires.

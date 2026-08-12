@@ -339,7 +339,10 @@ export class ApiRouter {
     const wait = readWaitFlag(body);
 
     if (!wait) {
-      void this.serviceManager.startAndWait(serviceID);
+      this.detach(
+        this.serviceManager.startAndWait(serviceID),
+        `start ${serviceID}`,
+      );
       this.sendJSON(res, 202, {
         ok: true,
         service: this.summaryOf(serviceID),
@@ -403,7 +406,10 @@ export class ApiRouter {
     const tuning = readStopTuning(body);
 
     if (!wait) {
-      void this.serviceManager.restartService(serviceID, tuning);
+      this.detach(
+        this.serviceManager.restartService(serviceID, tuning),
+        `restart ${serviceID}`,
+      );
       this.sendJSON(res, 202, {
         ok: true,
         service: this.summaryOf(serviceID),
@@ -576,6 +582,24 @@ export class ApiRouter {
 
   private summaryOf(serviceID: string): ServiceSummary {
     return toSummary(this.serviceManager.getService(serviceID)!);
+  }
+
+  /**
+   * Runs a `wait:false` lifecycle call to completion in the background, logging
+   * a rejection instead of letting it escape.
+   *
+   * The awaited paths are covered by `handle`'s try/catch, which turns a throw
+   * out of the start/stop/restart chain into a logged 500. A detached promise
+   * has no such cover: the same throw would surface as an unhandled rejection,
+   * which Node terminates the process for, taking the dashboard (and every
+   * service it manages) down over one fire-and-forget request. That the chain
+   * can throw is not hypothetical, `stopAllServices` guards each `stopService`
+   * call for exactly this reason.
+   */
+  private detach(work: Promise<unknown>, description: string) {
+    void work.catch((err) => {
+      this.logger.error(`Background ${description} failed:`, err as object);
+    });
   }
 
   private assertMethod(method: string, allowed: string[]) {

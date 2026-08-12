@@ -18,7 +18,17 @@ export type ApiResult<T> =
   // script exactly the wrong thing.
   | { kind: "interrupted"; message: string };
 
-/** Maps an API failure code onto the process exit code it should produce. */
+/**
+ * Maps an API failure code onto the process exit code it should produce.
+ *
+ * The `default` arm is load-bearing, not defensive padding: `request()` accepts
+ * any error envelope carrying a truthy `code`, and this CLI is installed as a
+ * global `bin` while the dashboard it drives is a project-local library, so a
+ * newer dashboard (or a proxy with its own error shape) can hand back a code
+ * this build has never heard of. Without the fallback the switch would return
+ * `undefined`, which rides all the way to `process.exitCode` and exits 0,
+ * reporting a failure as success to `dsd start api && deploy`.
+ */
 export function exitCodeForApiError(code: ApiErrorCode): ExitCode {
   switch (code) {
     case "service_not_found":
@@ -41,6 +51,18 @@ export function exitCodeForApiError(code: ApiErrorCode): ExitCode {
     case "unsupported_media_type":
     case "forbidden_origin":
       return EXIT.UNEXPECTED;
+    // A code this build doesn't know, which only happens at runtime. Adding a
+    // `default` arm makes every path return, which by itself would silently
+    // retire the compile-time exhaustiveness check (that was the implicit
+    // "function lacks ending return statement" error, and it can only fire
+    // while the end of the switch is reachable). Assigning to `never` restores
+    // it: add a member to `ApiErrorCode` without an arm above and this line
+    // stops compiling.
+    default: {
+      const unhandled: never = code;
+      void unhandled;
+      return EXIT.UNEXPECTED;
+    }
   }
 }
 

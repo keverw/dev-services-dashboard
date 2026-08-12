@@ -59,6 +59,10 @@ export type ExitCode = (typeof EXIT)[keyof typeof EXIT];
  * `bin.ts` is otherwise untestable without spawning a process.
  */
 export function finalExitCode(code: number, signalExitCode?: number): number {
+  // Anything that isn't a real number would become `process.exitCode =
+  // undefined`, i.e. a silent exit 0 on a command that failed. Treat it as an
+  // internal fault rather than letting a wrong success reach a shell script.
+  if (!Number.isInteger(code)) return signalExitCode ?? EXIT.INTERNAL;
   return code === EXIT.OK ? code : (signalExitCode ?? code);
 }
 
