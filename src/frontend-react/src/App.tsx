@@ -36,6 +36,13 @@ function AppContent() {
   const [stopAllInProgress, setStopAllInProgress] = useState(false);
   const stopAllInProgressRef = useRef(false);
   const stopAllProgressToastIdRef = useRef<string | null>(null);
+  // How many Stop All runs are in flight. Unlike Start All, the server allows a
+  // second run to begin while one is still going (that's how "Force Stop All"
+  // escalates the run it's replacing), and both broadcast their own
+  // begin/progress/done frames. Counting them means the first `done` to arrive
+  // doesn't tear down the in-progress state and the sticky progress toast that
+  // the other run is still driving.
+  const stopAllRunsRef = useRef(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [startAllInProgress, setStartAllInProgress] = useState(false);
@@ -318,12 +325,17 @@ function AppContent() {
       case "stop_all_begin":
         setStopAllInProgress(true);
         stopAllInProgressRef.current = true;
+        stopAllRunsRef.current += 1;
         // A second run can begin while one is still going (a "Force Stop All"
         // escalating the run it's replacing; the server doesn't refuse those
-        // the way it refuses a concurrent Start All). Retire the previous
-        // progress toast first: it's sticky (duration 0) and exempt from the
-        // eviction cap, so overwriting the ref would strand it on screen for
-        // the rest of the session.
+        // the way it refuses a concurrent Start All). The two share a single
+        // progress toast rather than getting one each: the forced run mostly
+        // joins the stops the first is already awaiting, so two toasts would
+        // count overlapping work. Retire the previous one rather than reusing
+        // its id: it's sticky (duration 0) and exempt from the eviction cap, so
+        // overwriting the ref would strand it for the rest of the session, and
+        // re-adding also recovers if the user dismissed it by hand (which
+        // leaves the ref pointing at a toast that's already gone).
         if (stopAllProgressToastIdRef.current) {
           removeToast(stopAllProgressToastIdRef.current);
           stopAllProgressToastIdRef.current = null;
@@ -337,10 +349,12 @@ function AppContent() {
         break;
       case "stop_all_progress":
         // Lazy-join a Stop All already in flight (e.g. after a refresh), same as
-        // Start All above.
+        // Start All above. Count it as one run so the `done` that follows
+        // settles the state rather than leaving it stuck in progress.
         if (!stopAllInProgressRef.current) {
           setStopAllInProgress(true);
           stopAllInProgressRef.current = true;
+          stopAllRunsRef.current = 1;
         }
         if (stopAllProgressToastIdRef.current) {
           updateToast(stopAllProgressToastIdRef.current, {
@@ -370,6 +384,14 @@ function AppContent() {
 
         break;
       case "stop_all_done": {
+        stopAllRunsRef.current = Math.max(0, stopAllRunsRef.current - 1);
+        // Another run is still going (this `done` came from the run a "Force
+        // Stop All" escalated, or from the forced run itself). Leave the
+        // in-progress state and the shared progress toast alone: the run still
+        // under way owns them, and it will emit its own `done` with the final
+        // counts.
+        if (stopAllRunsRef.current > 0) break;
+
         setStopAllInProgress(false);
         stopAllInProgressRef.current = false;
         const stopped = data.stopped ?? 0;
@@ -443,6 +465,9 @@ function AppContent() {
 
     setStopAllInProgress(false);
     stopAllInProgressRef.current = false;
+    // No `stop_all_done` is coming for any run now, so drop the whole count
+    // rather than decrementing it.
+    stopAllRunsRef.current = 0;
 
     if (stopAllProgressToastIdRef.current) {
       removeToast(stopAllProgressToastIdRef.current);

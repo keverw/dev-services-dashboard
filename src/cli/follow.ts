@@ -164,20 +164,22 @@ export function followLogs(options: FollowOptions): Promise<ExitCode> {
 
         case "logs_cleared":
           if (message.serviceID !== serviceID) return;
-          if (!json) stderr("dsd: log buffer cleared.\n");
+          stderr("dsd: log buffer cleared.\n");
           return;
 
         case "status_update":
           // Surface lifecycle changes on stderr so stdout stays pure log output,
-          // but the follower can still see the service die or come back.
+          // but the follower can still see the service die or come back. Emitted
+          // under `--json` too: these only ever go to stderr, so stdout stays
+          // valid NDJSON either way, and suppressing them would leave the very
+          // callers that pass `--json` (scripts, agents) unable to tell that the
+          // service they're following crashed.
           if (message.serviceID !== serviceID) return;
-          if (!json) {
-            stderr(
-              `dsd: ${serviceID} is now ${message.status}${
-                message.errorDetails ? ` (${message.errorDetails})` : ""
-              }.\n`,
-            );
-          }
+          stderr(
+            `dsd: ${serviceID} is now ${message.status}${
+              message.errorDetails ? ` (${message.errorDetails})` : ""
+            }.\n`,
+          );
           return;
 
         default:

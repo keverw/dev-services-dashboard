@@ -181,6 +181,13 @@ export class ServiceManager {
   // One-shot listeners that "Start All" registers per service to be notified
   // (via setStatus) when the service it's waiting on changes status.
   private startWaiters = new Map<string, (status: Service["status"]) => void>();
+  // Service IDs whose log buffer has actually evicted a line. Buffer *length*
+  // can't answer that on its own: `addLog` only evicts once the push takes it
+  // past `maxLogLines`, so a full-but-never-evicted buffer sits at exactly the
+  // cap and is indistinguishable from one that has been dropping lines. The
+  // control API reports this as `truncated`, which a `since`-based poller uses
+  // to decide whether it may have missed lines.
+  private evictedLogs = new Set<string>();
   // In-flight `startAndWait` runs, keyed by serviceID. A second concurrent
   // start of the same service attaches to the existing run's promise rather
   // than spawning a second waiter+timer (only one waiter can live in
@@ -367,6 +374,16 @@ export class ServiceManager {
   }
 
   /**
+   * Whether this service's log buffer has actually dropped an older line yet.
+   * A buffer sitting at exactly `maxLogLines` has not: `addLog` evicts only
+   * once a push takes it *past* the cap, so length alone would report a gap one
+   * entry before there is one.
+   */
+  hasEvictedLogs(serviceID: string): boolean {
+    return this.evictedLogs.has(serviceID);
+  }
+
+  /**
    * Latches the manager into shutdown so every start/restart/start-all path
    * refuses from here on. Called by the dashboard server's `stop()` before it
    * stops the services, so nothing can resurrect a service mid-shutdown.
@@ -400,6 +417,7 @@ export class ServiceManager {
     service.logs.push(logEntry);
     if (service.logs.length > this.maxLogLines) {
       service.logs.shift();
+      this.evictedLogs.add(serviceID);
     }
     this.broadcastLog(serviceID, line, logType, logEntry.timestamp);
   }
@@ -1378,6 +1396,9 @@ export class ServiceManager {
     const service = this.getService(serviceID);
     if (service) {
       service.logs = [];
+      // A cleared buffer has nothing older to have lost, so the next fill
+      // starts from "nothing evicted" again.
+      this.evictedLogs.delete(serviceID);
       this.logger.info(`Server-side logs cleared for service: ${service.name}`);
       this.addLog(serviceID, "Log buffer cleared by user.", "system");
       this.broadcastFn({ type: "logs_cleared", serviceID });

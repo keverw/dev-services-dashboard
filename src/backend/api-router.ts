@@ -560,9 +560,11 @@ export class ApiRouter {
       returned: entries.length,
       bufferSize,
       bufferLimit,
-      // At the cap, older lines have already been evicted, so a `since` poller
-      // needs to know it may have missed some.
-      truncated: bufferSize >= bufferLimit,
+      // Whether the ring buffer has actually dropped an older line, so a
+      // `since` poller knows it may have missed some. Asked of the manager
+      // rather than inferred from `bufferSize >= bufferLimit`: a buffer that
+      // has just reached the cap has not evicted anything yet.
+      truncated: this.serviceManager.hasEvictedLogs(serviceID),
     });
   }
 

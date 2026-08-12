@@ -104,8 +104,10 @@ export interface LogsResponse {
   /** The configured `maxLogLines` cap. */
   bufferLimit: number;
   /**
-   * True when the buffer is at its cap, meaning older lines have been evicted.
-   * A `since`-based poller can miss lines when this is true.
+   * True once the ring buffer has actually evicted an older line. A
+   * `since`-based poller can miss lines when this is true. Note a buffer that
+   * has merely reached `bufferLimit` has not evicted anything yet, so this
+   * stays false until the next line pushes one out.
    */
   truncated: boolean;
 }
