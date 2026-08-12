@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { randomUUID } from "crypto";
 import { constants } from "os";
 import { Service, UserServiceConfig } from "./types";
@@ -977,7 +977,7 @@ export class ServiceManager {
   }
 
   /**
-   * Sends a termination signal to a service's process. On POSIX the process was
+   * Sends a termination signal to a spawned process. On POSIX the process was
    * spawned detached (its own process group), so `targetGroup` signals the
    * whole group via a negative PID, reaching children the process forked (e.g.
    * a `bun run` / `vite` wrapper) that would otherwise be orphaned and keep
@@ -985,13 +985,16 @@ export class ServiceManager {
    * is signaled, letting it coordinate its own children. Falls back to
    * signaling just the process if the group signal fails or process groups
    * aren't available (Windows).
+   *
+   * Takes the child handle rather than the service so callers that signal
+   * asynchronously can hold onto the process they meant to kill: by the time
+   * they fire, `service.process` may already be a queued restart's replacement.
    */
   private stopSignal(
-    service: Service,
+    proc: ChildProcess | null,
     signal: NodeJS.Signals,
     targetGroup: boolean,
   ): void {
-    const proc = service.process;
     if (!proc || proc.pid === undefined) return;
 
     if (targetGroup && this.useProcessGroups) {
@@ -1209,10 +1212,15 @@ export class ServiceManager {
         return;
       }
 
-      const leaderPid = service.process.pid;
+      // The process this stop owns. Captured because signalling can happen
+      // after an await (see `escalate`), by which point `service.process` may
+      // be a queued restart's replacement that this stop must not touch.
+      const leader = service.process;
+      const leaderPid = leader.pid;
 
       service.process.removeAllListeners("exit");
       service.process.on("exit", () => {
+        leaderExited = true;
         this.logger.info(`Service ${service.name} confirmed stopped.`);
         this.addLog(serviceID, `${service.name} confirmed stopped.`, "system");
 
@@ -1263,6 +1271,10 @@ export class ServiceManager {
       // Declared before `escalate` so the closure can clear it; assigned below.
       let timeout: ReturnType<typeof setTimeout> | undefined;
       let escalated = false;
+      // Whether *our* leader has exited. Tracked separately from
+      // `service.process`, which a queued restart can repopulate with a
+      // different child while this stop is still settling.
+      let leaderExited = false;
       // When the currently-armed grace period expires, on `performance.now()`'s
       // monotonic clock. 0 until one is armed, and on the `force` path, which
       // arms none at all.
@@ -1278,7 +1290,7 @@ export class ServiceManager {
         escalated = true;
         clearTimeout(timeout);
 
-        if (!service.process) return;
+        if (leaderExited) return;
 
         if (reason === "forced") {
           this.logger.warn(`Force-stopping ${service.name} with SIGKILL.`);
@@ -1300,9 +1312,12 @@ export class ServiceManager {
 
         // Force-kill the whole group, plus any descendants that escaped it.
         // The walk runs while the process is still alive (so pids are
-        // current), then we send the group SIGKILL once it's done.
+        // current), then we send the group SIGKILL once it's done. Signals the
+        // captured `leader`, not `service.process`: the leader can exit during
+        // the walk and a queued start can install a replacement, which this
+        // SIGKILL must not hit.
         void this.reapEscapedDescendants(leaderPid).then(() => {
-          this.stopSignal(service, "SIGKILL", true);
+          this.stopSignal(leader, "SIGKILL", true);
         });
       };
 
@@ -1337,7 +1352,7 @@ export class ServiceManager {
       readGraceEndsAt = () => (escalated ? 0 : graceEndsAt);
       retimeStop = (graceMs: number) => {
         // Nothing to re-arm once we've already jumped to SIGKILL.
-        if (escalated || !service.process) return;
+        if (escalated || leaderExited) return;
         this.addLog(
           serviceID,
           `Grace period for ${service.name} reset to ${graceMs}ms.`,
@@ -1361,7 +1376,7 @@ export class ServiceManager {
 
       // Graceful stop: SIGTERM to just the main process so it can coordinate
       // its own children. Otherwise signal the whole process group.
-      this.stopSignal(service, "SIGTERM", !service.gracefulShutdown);
+      this.stopSignal(leader, "SIGTERM", !service.gracefulShutdown);
 
       armGrace(opts.graceMs);
     });
