@@ -38,7 +38,9 @@ export interface LogEntry {
    * on: `timestamp` comes from `Date.now()`, so several entries routinely
    * share one millisecond and a `since`-style filter would drop the ones that
    * landed after the cursor within the same tick. The control API's `cursor`
-   * query and `nextCursor` response field are expressed in these numbers.
+   * query and `nextCursor` response field are built on these numbers, paired
+   * with an id for the dashboard run that issued them: the counter starts again
+   * at 1 with the process, so a number alone repeats across restarts.
    */
   seq: number;
   timestamp: number;

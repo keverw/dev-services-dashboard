@@ -382,10 +382,17 @@ describe("Control API", () => {
       expect(
         entries.every((e, i) => i === 0 || e.seq > entries[i - 1].seq),
       ).toBe(true);
-      expect(all.nextCursor).toBe(entries[entries.length - 1].seq);
+      // The cursor carries the run that issued it as well as the entry it
+      // stopped at, since sequence numbers repeat after a restart.
+      expect(all.nextCursor).toMatch(
+        new RegExp(`^[0-9a-f]+:${entries[entries.length - 1].seq}$`),
+      );
 
+      const epoch = String(all.nextCursor).split(":")[0];
       const rest = await (
-        await fetch(`${base}/services/api/logs?cursor=${entries[0].seq}`)
+        await fetch(
+          `${base}/services/api/logs?cursor=${epoch}:${entries[0].seq}`,
+        )
       ).json();
       expect(rest.entries).toEqual(entries.slice(1));
 
@@ -420,7 +427,11 @@ describe("Control API", () => {
       // buffered entry, which would skip the backlog with nothing to warn the
       // caller (the buffer evicted nothing).
       const seen: number[] = [];
-      let cursor = 0;
+      // `0` is the one cursor a caller can write by hand: the oldest buffered
+      // entry, in whichever run answers. Every later page carries the token the
+      // previous one reported.
+      let cursor = "0";
+      let cursorSeq = 0;
       for (let i = 0; i < seqs.length + 5; i++) {
         const page = await (
           await fetch(`${base}/services/api/logs?cursor=${cursor}&limit=1`)
@@ -428,8 +439,10 @@ describe("Control API", () => {
         if (page.entries.length === 0) break;
         // Forward, oldest first: a paging caller reads the head, not the tail.
         seen.push(...page.entries.map((e: { seq: number }) => e.seq));
-        expect(page.nextCursor).toBeGreaterThan(cursor);
+        const seq = Number(String(page.nextCursor).split(":")[1]);
+        expect(seq).toBeGreaterThan(cursorSeq);
         cursor = page.nextCursor;
+        cursorSeq = seq;
       }
 
       expect(seen).toEqual(seqs);
@@ -444,7 +457,8 @@ describe("Control API", () => {
       const after = await (await fetch(`${base}/services/api/logs`)).json();
       // The counter is never reset, so a poller holding the pre-clear cursor
       // still sees the line the clear itself wrote.
-      expect(after.nextCursor).toBeGreaterThan(before.nextCursor);
+      const seqOf = (cursor: string) => Number(cursor.split(":")[1]);
+      expect(seqOf(after.nextCursor)).toBeGreaterThan(seqOf(before.nextCursor));
       const fresh = await (
         await fetch(`${base}/services/api/logs?cursor=${before.nextCursor}`)
       ).json();
@@ -455,21 +469,61 @@ describe("Control API", () => {
       expect(fresh.truncated).toBe(true);
     });
 
-    it("serves the buffer from the start for a cursor past its newest entry", async () => {
+    it("serves the buffer from the start for a cursor from an earlier run", async () => {
       await postJSON("/services/api/start");
 
       const all = await (await fetch(`${base}/services/api/logs`)).json();
-      // What a poller holds after the dashboard restarts: the sequence lives on
-      // the ServiceManager and begins again at 1, so its cursor now points past
-      // everything here. Honouring it would filter every entry out and strand
-      // the caller for good.
+      const seqs: number[] = all.entries.map((e: { seq: number }) => e.seq);
+      expect(seqs.length).toBeGreaterThan(1);
+
+      // What a poller holds after the dashboard restarts. The sequence lives on
+      // the ServiceManager and begins again at 1, so such a cursor names a
+      // number this run has *also* issued: honouring it would drop every entry
+      // below it and, since nothing here was evicted, report `truncated: false`
+      // while doing it. The epoch is what makes it recognisable.
       const stale = await (
-        await fetch(`${base}/services/api/logs?cursor=${all.nextCursor + 1000}`)
+        await fetch(`${base}/services/api/logs?cursor=earlierrun:${seqs[0]}`)
       ).json();
 
       expect(stale.entries).toEqual(all.entries);
       expect(stale.nextCursor).toBe(all.nextCursor);
       expect(stale.truncated).toBe(true);
+    });
+
+    it("rejects a cursor that is a bare number other than 0", async () => {
+      // A client from before cursors carried an epoch, or a hand-written guess.
+      // Reading it as a `seq` of this run is the silent-loss case above, so it
+      // fails loudly instead.
+      const res = await fetch(`${base}/services/api/logs?cursor=3`);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("bad_request");
+
+      // The last two are digits no counter ever reaches: read as numbers they
+      // lose precision, or become `Infinity`, and would come back out in
+      // `nextCursor` as a token the next poll rejects.
+      for (const bad of [
+        "abc",
+        ":4",
+        "run:",
+        "run:x",
+        `run:${"9".repeat(400)}`,
+        "run:9007199254740993",
+      ]) {
+        const rejected = await fetch(
+          `${base}/services/api/logs?cursor=${encodeURIComponent(bad)}`,
+        );
+        expect(rejected.status).toBe(400);
+      }
+
+      // Including under this run's own epoch, where an out-of-range `seq`
+      // against an empty buffer used to fall through into `nextCursor`.
+      const empty = await (await fetch(`${base}/services/worker/logs`)).json();
+      expect(empty.entries).toHaveLength(0);
+      const epoch = String(empty.nextCursor).split(":")[0];
+      const overflowed = await fetch(
+        `${base}/services/worker/logs?cursor=${epoch}:${"9".repeat(400)}`,
+      );
+      expect(overflowed.status).toBe(400);
     });
 
     it("rejects a non-integer limit", async () => {

@@ -543,12 +543,18 @@ async function commandLogs(ctx: Ctx): Promise<number> {
     return usageError(ctx.sink, "--lines must be a non-negative integer.");
   }
 
+  // A cursor is an opaque `<epoch>:<seq>` token rather than a bare number: the
+  // dashboard's sequence starts again at 1 when it restarts, so the epoch is
+  // what keeps a cursor from an earlier run from matching a reused number and
+  // silently skipping lines. `0` is the one number that still means something,
+  // namely the oldest buffered entry. The dashboard checks the epoch; this only
+  // catches a mistyped token before spending a round trip on it.
   const cursor =
-    ctx.values.cursor === undefined ? undefined : Number(ctx.values.cursor);
-  if (cursor !== undefined && (!Number.isInteger(cursor) || cursor < 0)) {
+    ctx.values.cursor === undefined ? undefined : String(ctx.values.cursor);
+  if (cursor !== undefined && !/^(?:0|[A-Za-z0-9_-]+:\d+)$/.test(cursor)) {
     return usageError(
       ctx.sink,
-      "--cursor must be a non-negative integer (a nextCursor from an earlier response).",
+      "--cursor must be a nextCursor from an earlier --json response, or 0 to start from the oldest buffered entry.",
     );
   }
 

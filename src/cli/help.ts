@@ -132,9 +132,9 @@ export const COMMANDS: CommandSpec[] = [
         summary: "Only entries newer than this epoch-milliseconds timestamp.",
       },
       {
-        name: "--cursor <seq>",
+        name: "--cursor <token>",
         summary:
-          "Only entries after this sequence number, for polling: pass back the nextCursor from the previous --json response. Prefer this over --since, whose millisecond timestamps can be shared by several entries. Pages forward from the cursor, so --lines is a page size here, not a tail.",
+          "Only entries after this cursor, for polling: pass back the nextCursor from the previous --json response verbatim, or 0 to start from the oldest buffered entry. Prefer this over --since, whose millisecond timestamps can be shared by several entries. Pages forward from the cursor, so --lines is a page size here, not a tail.",
       },
       {
         name: "--plain",

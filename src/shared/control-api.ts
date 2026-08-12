@@ -120,23 +120,30 @@ export interface LogsResponse {
    * cursor still belongs to the service it came from: sent to another service
    * it would re-deliver, or skip, that service's own entries.
    *
-   * It stops at the last entry in
-   * `entries` when `limit` held matching entries back, so the next poll
-   * collects the rest; otherwise it is the `seq` of the newest entry in the
-   * buffer, since anything newer than the last returned entry was excluded by
-   * this request's own `logType` filter and would be excluded again. Falls
-   * back to the `cursor` that was sent when there is nothing to point at, and
-   * to 0 when neither exists.
+   * An opaque `<epoch>:<seq>` token: the `seq` it stops at, stamped with an id
+   * for the dashboard run that issued it. Sequence numbers restart at 1 with
+   * the dashboard process, so the epoch is what lets a cursor from before a
+   * restart be recognised instead of quietly matching a reused number. Pass it
+   * back verbatim; the only other accepted `cursor` is `0`, meaning the oldest
+   * buffered entry.
+   *
+   * The `seq` it stops at is that of the last entry in `entries` when `limit`
+   * held matching entries back, so the next poll collects the rest; otherwise
+   * it is the `seq` of the newest entry in the buffer, since anything newer
+   * than the last returned entry was excluded by this request's own `logType`
+   * filter and would be excluded again. Falls back to the `seq` in the `cursor`
+   * that was sent when there is nothing to point at, and to 0 when neither
+   * exists.
    */
-  nextCursor: number;
+  nextCursor: string;
   /**
    * True once lines a poller may never have read are gone for good. That is:
    * the ring buffer has actually evicted an older line (a buffer that has
    * merely reached `bufferLimit` has not evicted anything yet, so this stays
    * false until the next line pushes one out), a `DELETE …/logs` has thrown a
-   * non-empty buffer away, or this request's `cursor` predates a restart of
-   * the sequence, in which case the buffer is served from the start rather
-   * than the cursor.
+   * non-empty buffer away, or this request's `cursor` came from an earlier run
+   * of the dashboard (its epoch isn't this run's), in which case the buffer is
+   * served from the start rather than the cursor.
    */
   truncated: boolean;
 }

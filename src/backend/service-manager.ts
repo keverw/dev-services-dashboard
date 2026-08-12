@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { randomUUID } from "crypto";
 import { constants } from "os";
 import { Service, UserServiceConfig } from "./types";
 import type { LogEntry, ServerMessage } from "@shared/protocol";
@@ -193,6 +194,14 @@ export class ServiceManager {
   // reset: clearing a buffer must not hand a later entry a number an earlier
   // one already used, or a poller holding the old cursor would skip it.
   private nextLogSeq = 1;
+  // Names this process's run of the sequence above. `nextLogSeq` starts again
+  // at 1 with the process, so a `seq` on its own can't tell a cursor issued
+  // before a restart from one issued after: once the new counter has climbed
+  // past that cursor, honouring it would silently drop every line below it and
+  // still report `truncated: false`. The control API pairs this id with the
+  // `seq` in every cursor it hands out, so a cursor from an earlier run is
+  // recognisable rather than merely plausible.
+  private readonly logEpoch = randomUUID().replace(/-/g, "").slice(0, 12);
   // In-flight `startAndWait` runs, keyed by serviceID. A second concurrent
   // start of the same service attaches to the existing run's promise rather
   // than spawning a second waiter+timer (only one waiter can live in
@@ -381,6 +390,16 @@ export class ServiceManager {
    */
   getMaxLogLines(): number {
     return this.maxLogLines;
+  }
+
+  /**
+   * Identifies this process's run of the log sequence. Every cursor the control
+   * API issues carries it, which is how a cursor from before a dashboard
+   * restart is told apart from a live one: sequence numbers themselves start
+   * again at 1, so they repeat across runs.
+   */
+  getLogEpoch(): string {
+    return this.logEpoch;
   }
 
   /**

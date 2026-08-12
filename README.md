@@ -690,7 +690,7 @@ The dashboard URL is resolved in this order:
 | `dsd health` (`ping`)             | Check a dashboard is reachable                                                |
 | `dsd help [<command>]`            | Help; `dsd help --json` emits the full machine-readable manifest              |
 
-Useful flags: `--json` (machine-readable output), `-f`/`--follow`, `--lines <n>`, `--type stdout,stderr,system`, `--since <epoch-ms>`, `--cursor <seq>`, `--plain` (bare log lines, no timestamp prefix), `--force`, `--grace <ms>`, `--no-wait`, `--timeout <ms>`, `--no-color`.
+Useful flags: `--json` (machine-readable output), `-f`/`--follow`, `--lines <n>`, `--type stdout,stderr,system`, `--since <epoch-ms>`, `--cursor <token>`, `--plain` (bare log lines, no timestamp prefix), `--force`, `--grace <ms>`, `--no-wait`, `--timeout <ms>`, `--no-color`.
 
 ```bash
 dsd status
@@ -755,14 +755,16 @@ A few details worth knowing:
 - Ctrl+C exits `0`. Ending a follow is what Ctrl+C is _for_ here, so it counts as success. (Everywhere else, Ctrl+C cuts a command short before its outcome is known and exits `130`.) A `SIGTERM` is not the same thing: that terminated the process rather than ending the follow, so it still reports the conventional `143` and a supervisor isn't told its child shut down on purpose. If the dashboard goes away mid-follow, it exits `5` (unreachable) rather than pretending the stream ended normally.
 - `--since` and `--cursor` are queries against the stored buffer, so neither can be combined with `--follow`.
 
-**Polling instead of following.** A script or agent that can't hold a stream open should page with `--cursor` rather than `--since`: every entry carries a `seq`, and each `--json` response reports the `nextCursor` to send back.
+**Polling instead of following.** A script or agent that can't hold a stream open should page with `--cursor` rather than `--since`: each `--json` response reports the `nextCursor` to send back, an opaque token you pass through verbatim.
 
 ```bash
-dsd logs api --json --cursor 0 --lines 50    # first page, oldest first
-dsd logs api --json --cursor 128 --lines 50  # nextCursor from the previous response
+dsd logs api --json --cursor 0 --lines 50               # first page, oldest first
+dsd logs api --json --cursor 8f2c1d40ab91:128 --lines 50  # nextCursor from the previous response
 ```
 
-`--since` compares `Date.now()` milliseconds, which several entries routinely share, so paging on the newest timestamp you saw silently drops the rest of that millisecond. With `--cursor`, `--lines` is a page size that reads **forward** from the cursor (oldest first), and `nextCursor` stops at the last entry actually delivered, so a backlog larger than the page arrives on the following polls instead of being skipped. Without `--cursor`, `--lines` still means "the last N". Check `truncated` in the response: when it's true, lines you may never have read are gone for good, whether the ring buffer evicted them, someone cleared the buffer, or your cursor predates a restart of the dashboard (the sequence starts over with the process, so a cursor from before it is served the buffer from the start rather than being stranded past the end of it).
+`--since` compares `Date.now()` milliseconds, which several entries routinely share, so paging on the newest timestamp you saw silently drops the rest of that millisecond. With `--cursor`, `--lines` is a page size that reads **forward** from the cursor (oldest first), and `nextCursor` stops at the last entry actually delivered, so a backlog larger than the page arrives on the following polls instead of being skipped. Without `--cursor`, `--lines` still means "the last N". Check `truncated` in the response: when it's true, lines you may never have read are gone for good, whether the ring buffer evicted them, someone cleared the buffer, or your cursor came from an earlier run of the dashboard (in which case the buffer is served from the start rather than from the cursor).
+
+A cursor pairs an entry's `seq` with an id for the dashboard run that issued it, which is why it isn't a plain number: sequence numbers start again at 1 with the dashboard process, so a bare number from before a restart would eventually match a line this run had reused and skip everything below it without setting `truncated`. Pass `nextCursor` back as-is; the only cursor worth writing by hand is `0`, the oldest buffered entry.
 
 ### Exit codes
 
@@ -819,7 +821,7 @@ Two behaviors worth knowing:
 - **`start` and `restart` block by default** until the service settles, so the response reflects the real outcome rather than "accepted". With hooks configured that can take up to `beforeStartTimeout + startTimeout + afterStartTimeout` (~130s with the defaults), which is why the CLI applies no client-side deadline to these commands. (Nor to `stop` / `stop-all`, which wait out a configurable `stopTimeout`.) Pass `{"wait":false}` for fire-and-forget.
 - **A start "succeeds" once the process spawns.** A service that exits immediately afterwards will report success and then show `error` on the next `status`, the same semantics the web UI's Start All has always had. If a fast-exiting service matters to you, follow a start with `dsd status <service> --check`.
 - **The log buffer is a ring buffer** capped at `maxLogLines`. A logs response includes `bufferSize`, `bufferLimit`, and `truncated`; when `truncated` is true, lines a poller may never have read are gone (evicted, cleared, or from before a dashboard restart).
-- **Poll with `cursor`, not `since`.** Every entry carries a `seq`, a counter that increases with every line the dashboard logs. A logs response reports `nextCursor`; send it back as `?cursor=N` and you get exactly the entries after it. `since` compares `Date.now()` milliseconds, which several entries routinely share, so a caller paging on the newest timestamp it saw would silently drop the rest of that millisecond. `since` remains available for the human "logs from this point in time" query. The `seq` is also on each live `log` frame over the WebSocket, so a follower and a poller name the same line the same way.
+- **Poll with `cursor`, not `since`.** Every entry carries a `seq`, a counter that increases with every line the dashboard logs. A logs response reports `nextCursor`, an opaque `<run-id>:<seq>` token; send it back as `?cursor=<token>` and you get exactly the entries after it. The run id is there because the counter starts again at 1 with the dashboard process: without it, a cursor held across a restart would eventually match a reused number and skip every line below it while reporting nothing lost. A cursor from another run is served the buffer from the start with `truncated: true`, and a bare number other than `0` (the oldest buffered entry) is rejected rather than guessed at. `since` compares `Date.now()` milliseconds, which several entries routinely share, so a caller paging on the newest timestamp it saw would silently drop the rest of that millisecond. `since` remains available for the human "logs from this point in time" query. The `seq` is also on each live `log` frame over the WebSocket, so a follower and a poller name the same line the same way.
   With a `cursor`, `limit` pages **forward** from it (oldest first) rather than returning the newest N, and `nextCursor` stops at the last entry actually delivered, so a backlog larger than `limit` is collected over the next polls instead of being skipped. Without a `cursor`, `limit` still means "the last N".
 
 ### Security
@@ -852,10 +854,10 @@ Prefer `--lines` over `dsd logs -f`: follow runs until interrupted, so only use
 it with a timeout (e.g. `timeout 10 dsd logs api -f`).
 
 To watch a service over several turns without holding a stream open, page with
-`dsd logs <service> --json --cursor <seq>`: each response reports the
-`nextCursor` to pass to the next call, so you see every new line exactly once.
-Start at `--cursor 0`. Do not page on timestamps with `--since`, several entries
-can share a millisecond.
+`dsd logs <service> --json --cursor <token>`: each response reports the
+`nextCursor` to pass to the next call verbatim, so you see every new line
+exactly once. Start at `--cursor 0`. Do not page on timestamps with `--since`,
+several entries can share a millisecond.
 
 In a fast edit/restart loop, `dsd restart <service> --grace 300` avoids waiting
 out the full shutdown grace period on every cycle.

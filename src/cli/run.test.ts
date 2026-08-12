@@ -305,6 +305,14 @@ describe("CLI", () => {
       const { code, stderr } = await cli("logs", "api", "--cursor", "1.5");
       expect(code).toBe(EXIT.USAGE);
       expect(stderr).toContain("--cursor");
+
+      // A bare number other than 0 is a cursor from before they carried the
+      // dashboard run that issued them: it names a sequence number this run may
+      // well have reused, so it fails rather than skipping lines under a
+      // caller that thinks it is paging losslessly.
+      const bare = await cli("logs", "api", "--cursor", "12");
+      expect(bare.code).toBe(EXIT.USAGE);
+      expect(bare.stderr).toContain("--cursor");
     });
 
     it("--cursor pages forward from a previous nextCursor", async () => {
@@ -314,7 +322,7 @@ describe("CLI", () => {
       expect(first.entries.length).toBeGreaterThan(0);
 
       const caughtUp = JSON.parse(
-        (await cli("logs", "api", "--json", "--cursor", `${first.nextCursor}`))
+        (await cli("logs", "api", "--json", "--cursor", first.nextCursor))
           .stdout,
       );
       expect(caughtUp.entries).toHaveLength(0);

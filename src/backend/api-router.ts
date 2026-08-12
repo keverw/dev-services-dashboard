@@ -540,19 +540,21 @@ export class ApiRouter {
     // millisecond. `seq` is gap-free and strictly increasing, so `cursor`
     // resumes exactly where the last response ended. `since` stays for the
     // human "logs from this point in time" query.
-    const cursor = readIntParam(url, "cursor");
-    // A cursor past the newest buffered entry cannot have come from this
-    // dashboard's sequence: the counter lives on the ServiceManager, so it
-    // restarts at 1 with the process. That's a poller holding a cursor from
-    // before a restart, and honouring it would filter every entry out and
-    // strand the caller for good (while `nextCursor` quietly rewound under
-    // it). Serve the buffer from the start instead, and report the gap through
-    // `truncated`, which is the flag a poller already watches for lost lines.
+    // A cursor names the run that issued it as well as the entry it stopped
+    // at, because the sequence itself doesn't survive a restart: the counter
+    // lives on the ServiceManager, so it begins again at 1 with the process and
+    // a bare number from an earlier run is indistinguishable from a live one
+    // once the new counter has climbed past it. Honouring such a cursor would
+    // skip every line below it while reporting nothing lost. A cursor from
+    // another run is served the buffer from the start instead, with the gap
+    // reported through `truncated`, the flag a poller already watches.
+    const epoch = this.serviceManager.getLogEpoch();
+    const cursor = readCursorParam(url, epoch);
+    const staleCursor = cursor?.stale === true;
+    const cursorSeq = cursor && !cursor.stale ? cursor.seq : undefined;
     const newestSeq = service.logs[service.logs.length - 1]?.seq;
-    const staleCursor =
-      cursor !== undefined && newestSeq !== undefined && cursor > newestSeq;
-    if (cursor !== undefined && !staleCursor) {
-      entries = entries.filter((e) => e.seq > cursor);
+    if (cursorSeq !== undefined) {
+      entries = entries.filter((e) => e.seq > cursorSeq);
     }
 
     const limit = readIntParam(url, "limit") ?? DEFAULT_LOG_LIMIT;
@@ -605,15 +607,19 @@ export class ApiRouter {
       // buffered entry: anything newer than the last returned one can then only
       // have been dropped by `logType` (`since`/`cursor` drop older ones), and
       // the next poll would drop it again, so advancing past it costs the
-      // caller nothing and saves rescanning it forever.
-      nextCursor: heldBack
-        ? (entries[entries.length - 1]?.seq ?? cursor ?? 0)
-        : (newestSeq ?? cursor ?? 0),
+      // caller nothing and saves rescanning it forever. It is stamped with this
+      // run's epoch, so the next poll to carry it back is recognisable as this
+      // dashboard's own even after the sequence has restarted.
+      nextCursor: `${epoch}:${
+        heldBack
+          ? (entries[entries.length - 1]?.seq ?? cursorSeq ?? 0)
+          : (newestSeq ?? cursorSeq ?? 0)
+      }`,
       // Whether lines a poller may never have read are gone: the ring buffer
       // evicted one (asked of the manager rather than inferred from
       // `bufferSize >= bufferLimit`, since a buffer that has just reached the
-      // cap has not evicted anything yet), or this request's cursor predates a
-      // restart of the sequence, so whatever it was pointing at is not here.
+      // cap has not evicted anything yet), or this request's cursor came from
+      // an earlier run of the dashboard, so whatever it pointed at is not here.
       truncated: this.serviceManager.hasEvictedLogs(serviceID) || staleCursor,
     });
   }
@@ -911,6 +917,55 @@ function readStopTuning(body: Record<string, unknown> | undefined): {
   }
 
   return { force, graceMs: raw };
+}
+
+/**
+ * Reads the `cursor` query parameter, which is either `0` (start from the
+ * oldest buffered entry) or a `nextCursor` from an earlier response, shaped
+ * `<epoch>:<seq>`.
+ *
+ * `stale` marks a cursor whose epoch isn't this run's: the entry it named
+ * belongs to a dashboard that has since restarted, so its `seq` means nothing
+ * here and the caller is served the buffer from the start.
+ *
+ * A bare number other than `0` is refused rather than read as a `seq` of this
+ * run. Such a cursor is either a client from before cursors carried an epoch or
+ * a hand-written guess, and both are exactly the case an epoch exists to catch:
+ * silently accepting one would skip every entry below it and report nothing
+ * lost.
+ */
+function readCursorParam(
+  url: URL,
+  epoch: string,
+): { seq: number; stale: boolean } | undefined {
+  const raw = url.searchParams.get("cursor");
+  if (raw === null || raw === "") return undefined;
+
+  const malformed = () =>
+    new ApiFailure(
+      "bad_request",
+      '"cursor" must be a nextCursor from an earlier response, or 0 to start from the oldest buffered entry.',
+    );
+
+  if (!raw.includes(":")) {
+    if (raw !== "0") throw malformed();
+    return { seq: 0, stale: false };
+  }
+
+  const separator = raw.lastIndexOf(":");
+  const from = raw.slice(0, separator);
+  const digits = raw.slice(separator + 1);
+  if (from.length === 0 || !/^\d+$/.test(digits)) throw malformed();
+
+  // The digits are checked as a *number*, not just as a shape: no counter
+  // reaches beyond `Number.MAX_SAFE_INTEGER`, so anything past it was never
+  // issued here, and reading it anyway would carry an imprecise value (or
+  // `Infinity`) into `nextCursor`, handing the caller a token the next poll
+  // would then reject.
+  const seq = Number(digits);
+  if (!Number.isSafeInteger(seq)) throw malformed();
+
+  return { seq, stale: from !== epoch };
 }
 
 function readIntParam(url: URL, name: string): number | undefined {
